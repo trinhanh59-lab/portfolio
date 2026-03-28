@@ -310,7 +310,7 @@ function signOut() {
   state.ownerMode = false;
   sessionStorage.removeItem("ownerMode");
   syncOwnerUI();
-  closeOverlay("reviewOverlay");
+  closeReview();
   closeOverlay("detailOverlay");
   renderSeries();
   renderGallery();
@@ -329,58 +329,127 @@ function isImageFile(file) {
   return file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name);
 }
 
+// Auto-save flow: extract EXIF → upload to Cloudinary → save to Supabase.
+// No review form. Click any photo after upload to edit its details.
 async function processFiles(files) {
-  setStatus(`Reading ${files.length} file${files.length === 1 ? "" : "s"}…`);
-  setProgress(10);
-  const drafts = [];
+  if (!files.length) return;
+  setProgress(2);
+  let saved = 0;
+
   for (let i = 0; i < files.length; i++) {
-    drafts.push(await makeDraft(files[i]));
-    setProgress(10 + Math.round((i + 1) / files.length * 80));
+    setStatus(`Extracting metadata (${i + 1}/${files.length})…`);
+    const meta = await extractMeta(files[i]);
+
+    setStatus(`Uploading ${i + 1} of ${files.length}…`);
+    try {
+      const cldForm = new FormData();
+      cldForm.append("file",           files[i]);
+      cldForm.append("upload_preset",  CLOUDINARY_PRESET);
+      cldForm.append("public_id",      meta.id);
+      const res  = await fetch(CLOUDINARY_UPLOAD, { method: "POST", body: cldForm });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      meta.cloudinaryId = data.public_id;
+    } catch (err) {
+      setStatus(`Upload failed: ${err.message}`);
+      setProgress(100);
+      return;
+    }
+
+    await sbUpsert(meta);
+    saved++;
+    setProgress(2 + Math.round((i + 1) / files.length * 96));
   }
+
   setProgress(100);
-  state.reviewMode  = "create";
-  state.reviewQueue = drafts;
-  renderReview();
-  openOverlay("reviewOverlay");
-  setStatus(`Reviewing ${files.length} photo${files.length === 1 ? "" : "s"}.`);
+  await refresh();
+  setStatus(`${saved} photo${saved === 1 ? "" : "s"} added. Tap any photo to edit details.`);
 }
 
-async function makeDraft(file) {
-  const previewUrl = URL.createObjectURL(file);
-  state.reviewUrls.push(previewUrl);
-  let exif = {}, gps;
+// Extract all EXIF/GPS/IPTC from a file without opening any modal.
+async function extractMeta(file) {
+  let exif = {};
   try {
     exif = await window.exifr.parse(file, {
-      pick: ["DateTimeOriginal", "CreateDate", "Make", "Model", "LensModel",
-             "FNumber", "ExposureTime", "ISO", "FocalLength"]
+      tiff: true, exif: true, gps: true, iptc: true, xmp: true,
+      translateKeys: true, translateValues: true, reviveValues: true
     }) || {};
   } catch (_) {}
-  try { gps = await window.exifr.gps(file); } catch (_) {}
-  const lat = gps && typeof gps.latitude  === "number" ? gps.latitude.toFixed(5)  : "";
-  const lon = gps && typeof gps.longitude === "number" ? gps.longitude.toFixed(5) : "";
-  const inferredDate = fmtDateInput(exif.DateTimeOriginal || exif.CreateDate);
+
+  // GPS: exifr injects latitude/longitude at top level when gps:true.
+  // Fall back to the dedicated gps() call if absent.
+  let lat = exif.latitude, lon = exif.longitude;
+  if (lat == null || lon == null) {
+    try { const g = await window.exifr.gps(file); if (g) { lat = g.latitude; lon = g.longitude; } } catch (_) {}
+  }
+  const latStr = lat != null ? Number(lat).toFixed(5) : "";
+  const lonStr = lon != null ? Number(lon).toFixed(5) : "";
+
+  // Date — try every common tag name
+  const rawDate = exif.DateTimeOriginal || exif.CreateDate || exif.DateTime || exif.DateTimeDigitized;
+  const dateTaken = fmtDateInput(rawDate);
+
+  // Camera — deduplicate "Canon Canon EOS R5" patterns
+  const make  = str(exif.Make  || "").replace(/\0/g, "").trim();
+  const model = str(exif.Model || "").replace(/\0/g, "").trim();
+  const camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : compact([make, model]);
+
+  // Lens, ISO — multiple tag aliases across manufacturers
+  const lens    = str(exif.LensModel || exif.Lens || exif.LensInfo || "");
+  const isoRaw  = exif.ISO ?? exif.ISOSpeedRatings ?? exif.PhotographicSensitivity;
+
+  // Title / description from embedded IPTC / XMP (e.g. Lightroom captions)
+  const embeddedTitle = str(exif.ObjectName || exif.Headline || exif.Title || "");
+  const embeddedDesc  = str(exif.ImageDescription || exif.Description || exif["Caption-Abstract"] || exif.Caption || "");
+
   return {
-    draftId:        genId(),
-    existing:       false,
     id:             genId(),
-    file,
-    previewUrl,
     cloudinaryId:   null,
-    title:          titleize(file.name),
-    description:    "",
+    title:          embeddedTitle || titleize(file.name),
+    description:    embeddedDesc,
     series:         "",
-    dateTaken:      inferredDate,
-    location:       lat && lon ? `${lat}, ${lon}` : "",
-    coordinates:    lat && lon ? `${lat}, ${lon}` : "",
-    camera:         compact([exif.Make, exif.Model]),
-    lens:           str(exif.LensModel),
+    dateTaken,
+    location:       latStr && lonStr ? `${latStr}, ${lonStr}` : "",
+    coordinates:    latStr && lonStr ? `${latStr}, ${lonStr}` : "",
+    camera,
+    lens,
     aperture:       fmtAperture(exif.FNumber),
     shutterSpeed:   fmtShutter(exif.ExposureTime),
-    iso:            exif.ISO ? String(exif.ISO) : "",
+    iso:            isoRaw != null ? String(isoRaw) : "",
     focalLength:    fmtFocal(exif.FocalLength),
     uploadedAt:     new Date().toISOString(),
-    orderTimestamp: inferredDate ? new Date(inferredDate).getTime() : Date.now(),
+    orderTimestamp: dateTaken ? new Date(dateTaken).getTime() : Date.now(),
     starred:        false
+  };
+}
+
+// makeDraft is kept for the edit flow (startEdit), which needs a blob preview URL.
+async function makeDraft(photo) {
+  const previewUrl = photo.cloudinaryId
+    ? cloudinaryUrl(photo.cloudinaryId, "w_600,q_auto,f_auto")
+    : "";
+  return {
+    draftId:        genId(),
+    existing:       true,
+    id:             photo.id,
+    file:           null,
+    previewUrl,
+    cloudinaryId:   photo.cloudinaryId,
+    title:          photo.title          || "",
+    description:    photo.description    || "",
+    series:         photo.series         || "",
+    dateTaken:      photo.dateTaken      || "",
+    location:       photo.location       || "",
+    coordinates:    photo.coordinates    || "",
+    camera:         photo.camera         || "",
+    lens:           photo.lens           || "",
+    aperture:       photo.aperture       || "",
+    shutterSpeed:   photo.shutterSpeed   || "",
+    iso:            photo.iso            || "",
+    focalLength:    photo.focalLength    || "",
+    uploadedAt:     photo.uploadedAt     || new Date().toISOString(),
+    orderTimestamp: photo.orderTimestamp || Date.now(),
+    starred:        photo.starred        || false
   };
 }
 
@@ -432,11 +501,11 @@ function renderReview() {
   }).join("");
 }
 
+// saveReview is now edit-only — new uploads go through processFiles directly.
 async function saveReview() {
   const forms = Array.from(document.getElementById("reviewList").querySelectorAll(".review-form"));
   if (!forms.length) return;
-  const editing = state.reviewMode === "edit";
-  setStatus(editing ? "Updating…" : "Uploading to Cloudinary…");
+  setStatus("Saving…");
   setProgress(5);
 
   for (let i = 0; i < forms.length; i++) {
@@ -445,10 +514,10 @@ async function saveReview() {
     const fd = new FormData(f);
     const dt = str(fd.get("dateTaken"));
 
-    const record = {
+    await sbUpsert({
       id:             d.id,
       cloudinaryId:   d.cloudinaryId || null,
-      uploadedAt:     d.uploadedAt || new Date().toISOString(),
+      uploadedAt:     d.uploadedAt   || new Date().toISOString(),
       orderTimestamp: dt ? new Date(dt).getTime() : d.orderTimestamp || Date.now(),
       title:          str(fd.get("title")) || "Untitled",
       series:         str(fd.get("series")),
@@ -463,35 +532,14 @@ async function saveReview() {
       iso:            str(fd.get("iso")),
       focalLength:    str(fd.get("focalLength")),
       starred:        fd.get("starred") === "on"
-    };
-
-    // Upload to Cloudinary for new photos
-    if (!editing && d.file) {
-      try {
-        setStatus(`Uploading ${i + 1} of ${forms.length} to Cloudinary…`);
-        const cldForm = new FormData();
-        cldForm.append("file", d.file);
-        cldForm.append("upload_preset", CLOUDINARY_PRESET);
-        cldForm.append("public_id", record.id);
-        const res  = await fetch(CLOUDINARY_UPLOAD, { method: "POST", body: cldForm });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error.message);
-        record.cloudinaryId = data.public_id;
-      } catch (err) {
-        setStatus(`Upload failed: ${err.message}`);
-        setProgress(100);
-        return;
-      }
-    }
-
-    await sbUpsert(record);
+    });
     setProgress(5 + Math.round((i + 1) / forms.length * 93));
   }
 
   setProgress(100);
   closeReview();
   await refresh();
-  setStatus(editing ? "Updated." : `${forms.length} photo${forms.length === 1 ? "" : "s"} saved.`);
+  setStatus("Updated.");
 }
 
 function closeReview() {
@@ -872,9 +920,10 @@ async function saveAlbum(e) {
 
   await sbAlbumUpsert(album);
   closeOverlay("albumOverlay");
+  const wasEditing = !!state.editingAlbum;
   state.editingAlbum = null;
   await refresh();
-  setStatus(state.editingAlbum ? "Album updated." : "Album saved.");
+  setStatus(wasEditing ? "Album updated." : "Album saved.");
 }
 
 async function deleteAlbum() {
