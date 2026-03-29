@@ -317,7 +317,7 @@ button, input, textarea, select { font: inherit; }
 
 /* ─── Section wrapper ─────────────────────────────────────────────────────── */
 .section {
-  padding: clamp(80px, 12vh, 140px) var(--pad);
+  padding: clamp(56px, 10vh, 100px) var(--pad);
 }
 
 /* ─── Editorial section rule ──────────────────────────────────────────────── */
@@ -325,7 +325,7 @@ button, input, textarea, select { font: inherit; }
   display: flex;
   align-items: center;
   gap: 18px;
-  margin-bottom: 56px;
+  margin-bottom: 36px;
 }
 
 .rule-num {
@@ -389,31 +389,50 @@ button, input, textarea, select { font: inherit; }
 #collections {
   background: var(--bg);
   border-top: 1px solid var(--line2);
+  padding-left: 0;
+  padding-right: 0;
 }
 
-.series-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 3px;
+#collections .section-rule {
+  padding: 0 var(--pad);
 }
+
+#collections .btn-ghost {
+  margin-left: var(--pad);
+  margin-bottom: 32px;
+}
+
+/* Horizontal filmstrip */
+.series-grid {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  cursor: grab;
+  padding: 0 var(--pad) clamp(24px, 4vh, 48px);
+  /* hide scrollbar */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.series-grid::-webkit-scrollbar { display: none; }
+.series-grid:active { cursor: grabbing; }
 
 .series-tile {
+  flex: 0 0 clamp(260px, 30vw, 380px);
+  scroll-snap-align: start;
   position: relative;
   overflow: hidden;
   background: var(--bg2);
-  border: 1px solid var(--line);
-  min-height: 380px;
+  min-height: 520px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  padding: 28px;
+  padding: 32px 28px;
   cursor: pointer;
-  transition: border-color 0.3s, box-shadow 0.3s;
+  transition: opacity 0.3s;
 }
-.series-tile:hover {
-  border-color: var(--line2);
-  box-shadow: 0 4px 32px rgba(28,26,23,0.08);
-}
+.series-tile:hover { opacity: 0.92; }
 
 .series-tile-bg {
   position: absolute;
@@ -558,7 +577,7 @@ button, input, textarea, select { font: inherit; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
   flex-wrap: wrap;
 }
 
