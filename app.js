@@ -60,17 +60,6 @@ const IMAGEKIT_BASE_URL    = `https://ik.imagekit.io/${IMAGEKIT_ID}`;
 //   ALTER TABLE albums ENABLE ROW LEVEL SECURITY;
 //   CREATE POLICY "public_all" ON albums FOR ALL USING (true) WITH CHECK (true);
 //
-//   -- Tags table (new)
-//   CREATE TABLE IF NOT EXISTS tags (
-//     name text PRIMARY KEY,
-//     color text DEFAULT 'slate',
-//     created_at timestamptz DEFAULT now()
-//   );
-//   ALTER TABLE tags ENABLE ROW LEVEL SECURITY;
-//   CREATE POLICY "public_all" ON tags FOR ALL USING (true) WITH CHECK (true);
-//
-//   -- Add tags column to photos
-//   ALTER TABLE photos ADD COLUMN IF NOT EXISTS tags text DEFAULT '';
 
 const SUPABASE_URL      = "https://beanpxolozlggbwdoqjl.supabase.co";
 const SUPABASE_KEY      = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlYW5weG9sb3psZ2did2RvcWpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3Mjk5ODgsImV4cCI6MjA5MDMwNTk4OH0.isvxqR-lIk8nchcGdBBXq9OQ2COIyr4AnDO6hOxzLHc";
@@ -92,8 +81,6 @@ const state = {
   reviewUrls:      [],
   pendingDeleteId: null,
   editingAlbum:    null,    // name of album being edited, or null for new
-  tags:            [],
-  editingTag:      null,    // name of tag being edited, or null for new
   uploading:       false    // prevents concurrent/duplicate upload calls
 };
 
@@ -203,10 +190,6 @@ function bindEvents() {
   document.getElementById("albumForm").addEventListener("submit", saveAlbum);
   document.getElementById("albumDeleteBtn").addEventListener("click", deleteAlbum);
 
-  // Tag management
-  document.getElementById("newTagBtn").addEventListener("click", () => openTagEditor(null));
-  document.getElementById("tagForm").addEventListener("submit", saveTag);
-  document.getElementById("tagDeleteBtn").addEventListener("click", deleteTag);
 
   // Delegated clicks
   document.addEventListener("click", e => {
@@ -230,19 +213,7 @@ function bindEvents() {
       openAlbumEditor(ae.dataset.albumEdit);
       return;
     }
-    // Tag edit button
-    const te = e.target.closest("[data-tag-edit]");
-    if (te) {
-      e.stopPropagation();
-      openTagEditor(te.dataset.tagEdit);
-      return;
-    }
-    // Tag chip select toggle (in review form)
-    const tc = e.target.closest(".tag-chip-option");
-    if (tc) {
-      tc.classList.toggle("selected", tc.querySelector("input").checked);
-      return;
-    }
+
     // Photo brick click → detail
     const brick = e.target.closest("[data-photo-id]");
     if (brick && !e.target.closest("[data-action]")) {
@@ -287,7 +258,7 @@ function bindEvents() {
       if (document.getElementById("confirmOverlay").classList.contains("open")) { closeOverlay("confirmOverlay"); return; }
       if (document.getElementById("detailOverlay").classList.contains("open"))  { closeOverlay("detailOverlay"); return; }
       if (document.getElementById("albumOverlay").classList.contains("open"))   { closeOverlay("albumOverlay"); return; }
-      if (document.getElementById("tagOverlay").classList.contains("open"))     { closeOverlay("tagOverlay"); return; }
+
       if (document.getElementById("loginOverlay").classList.contains("open"))   { closeOverlay("loginOverlay"); return; }
     }
     if (document.getElementById("detailOverlay").classList.contains("open")) {
@@ -298,7 +269,7 @@ function bindEvents() {
 }
 
 // ─── Overlays ─────────────────────────────────────────────────────────────────
-const OVERLAYS = ["loginOverlay", "reviewOverlay", "detailOverlay", "confirmOverlay", "albumOverlay", "tagOverlay"];
+const OVERLAYS = ["loginOverlay", "reviewOverlay", "detailOverlay", "confirmOverlay", "albumOverlay"];
 
 function openOverlay(id) {
   document.getElementById(id).classList.add("open");
@@ -318,7 +289,6 @@ function syncOwnerUI() {
   document.getElementById("heroUploadBtn").classList.toggle("hidden", !state.ownerMode);
   document.getElementById("dropZone").classList.toggle("visible", state.ownerMode);
   document.getElementById("newAlbumBtn").classList.toggle("hidden", !state.ownerMode);
-  document.getElementById("newTagBtn").classList.toggle("hidden", !state.ownerMode);
   const btn = document.getElementById("ownerBtn");
   btn.innerHTML = state.ownerMode ? `<span class="owner-dot"></span>Sign out` : "Owner Login";
 }
@@ -478,8 +448,7 @@ async function extractMeta(file) {
     focalLength:    fmtFocal(exif.FocalLength),
     uploadedAt:     new Date().toISOString(),
     orderTimestamp: dateTaken ? new Date(dateTaken).getTime() : Date.now(),
-    starred:        false,
-    tags:           ""
+    starred:        false
   };
 }
 
@@ -552,19 +521,6 @@ function renderReview() {
             <div class="field"><label>Focal length</label><input name="focalLength" type="text" value="${escA(d.focalLength)}" placeholder="35mm"/></div>
             <div class="field"><label>Coordinates</label><input name="coordinates" type="text" value="${escA(d.coordinates)}" placeholder="GPS (optional)"/></div>
           </div>
-          ${state.tags.length ? `
-          <div class="field">
-            <label>Tags</label>
-            <div class="tag-chips-select">
-              ${state.tags.map(t => {
-                const checked = d.tags && d.tags.split(",").map(s => s.trim()).includes(t.name);
-                return `<label class="tag-chip-option${checked ? " selected" : ""}">
-                  <input type="checkbox" name="tags" value="${escA(t.name)}" ${checked ? "checked" : ""} />
-                  <span class="tag-pill" data-color="${escA(t.color)}">${esc(t.name)}</span>
-                </label>`;
-              }).join("")}
-            </div>
-          </div>` : ""}
           <label class="featured-toggle">
             <input type="checkbox" name="starred" ${d.starred ? "checked" : ""} />
             <span class="featured-toggle-label">★ Mark as featured</span>
@@ -604,8 +560,7 @@ async function saveReview() {
       shutterSpeed:   str(fd.get("shutterSpeed")),
       iso:            str(fd.get("iso")),
       focalLength:    str(fd.get("focalLength")),
-      starred:        fd.get("starred") === "on",
-      tags:           Array.from(f.querySelectorAll('input[name="tags"]:checked')).map(cb => cb.value).join(",")
+      starred:        fd.get("starred") === "on"
     });
     setProgress(5 + Math.round((i + 1) / forms.length * 93));
   }
@@ -626,7 +581,7 @@ function closeReview() {
 
 // ─── Refresh ──────────────────────────────────────────────────────────────────
 async function refresh() {
-  [state.photos, state.albums, state.tags] = await Promise.all([sbGetAll(), sbAlbumsGetAll(), sbTagsGetAll()]);
+  [state.photos, state.albums] = await Promise.all([sbGetAll(), sbAlbumsGetAll()]);
   sortPhotos();
   const seriesNames = uniq(state.photos.map(p => p.series));
   const albumNames  = state.albums.map(a => a.name);
@@ -636,7 +591,6 @@ async function refresh() {
   }
   renderStats();
   renderSeries();
-  renderTags();
   renderTax();
   renderFilters();
   renderGallery();
@@ -830,18 +784,11 @@ function renderDetail(photo) {
   img.src = cloudinaryUrl(photo.cloudinaryId, "w_2000,q_auto,f_auto");
 
   // Tags
-  const customTags = photo.tags
-    ? photo.tags.split(",").map(s => s.trim()).filter(Boolean).map(name => {
-        const t = state.tags.find(x => x.name === name);
-        return `<span class="tag-pill" data-color="${escA(t?.color || "slate")}">${esc(name)}</span>`;
-      }).join("")
-    : "";
   document.getElementById("detailTags").innerHTML = [
     photo.starred && `<span class="tag featured-tag">★ Featured</span>`,
     photo.series  && `<span class="tag">Album · ${esc(photo.series)}</span>`,
     photo.camera  && `<span class="tag">${esc(photo.camera)}</span>`,
-    photo.lens    && `<span class="tag">${esc(photo.lens)}</span>`,
-    customTags
+    photo.lens    && `<span class="tag">${esc(photo.lens)}</span>`
   ].filter(Boolean).join("");
 
   // Metadata grid
@@ -940,8 +887,7 @@ function startEdit(id) {
     focalLength:    p.focalLength    || "",
     uploadedAt:     p.uploadedAt     || new Date().toISOString(),
     orderTimestamp: p.orderTimestamp || Date.now(),
-    starred:        p.starred        || false,
-    tags:           p.tags           || ""
+    starred:        p.starred        || false
   }];
   closeOverlay("detailOverlay");
   renderReview();
@@ -1018,85 +964,6 @@ async function deleteAlbum() {
   state.editingAlbum = null;
   await refresh();
   setStatus("Album deleted.");
-}
-
-// ─── Tag management ───────────────────────────────────────────────────────────
-function renderTags() {
-  const wrap = document.getElementById("tagsWrap");
-  if (!wrap) return;
-
-  if (!state.tags.length) {
-    wrap.innerHTML = `<div style="border:1px dashed var(--line);border-radius:12px;padding:32px;color:var(--muted);font-size:0.88rem;">
-      Tags will appear here${state.ownerMode ? ". Click <strong>+ New Tag</strong> to create one." : "."}
-    </div>`;
-    return;
-  }
-
-  wrap.innerHTML = `<div class="tag-manager-list">${state.tags.map(t => {
-    const editBtn = state.ownerMode
-      ? `<button type="button" class="btn-quiet tag-edit-btn" data-tag-edit="${escA(t.name)}" style="font-size:0.72rem;min-height:28px;padding:4px 12px;">Edit</button>`
-      : "";
-    return `<div class="tag-manager-item">
-      <span class="tag-pill" data-color="${escA(t.color)}">${esc(t.name)}</span>
-      ${editBtn}
-    </div>`;
-  }).join("")}</div>`;
-}
-
-function openTagEditor(name) {
-  const isNew = !name;
-  const tag   = state.tags.find(t => t.name === name);
-
-  document.getElementById("tagModalLabel").textContent = isNew ? "Create tag" : "Edit tag";
-  document.getElementById("tagModalTitle").textContent = isNew ? "New Tag" : name;
-  document.getElementById("tagNameField").value        = name || "";
-  document.getElementById("tagNameField").readOnly     = !isNew;
-  document.getElementById("tagNameNote").textContent   = isNew ? "" : "Tag name cannot be changed.";
-  document.getElementById("tagErr").textContent        = "";
-  document.getElementById("tagDeleteBtn").classList.toggle("hidden", isNew);
-
-  // Set color radio
-  const color = tag?.color || "slate";
-  const radios = document.querySelectorAll('#tagColorPicker input[name="color"]');
-  radios.forEach(r => { r.checked = r.value === color; });
-
-  state.editingTag = isNew ? null : name;
-  openOverlay("tagOverlay");
-  if (isNew) requestAnimationFrame(() => document.getElementById("tagNameField").focus());
-}
-
-async function saveTag(e) {
-  e.preventDefault();
-  const fd    = new FormData(e.target);
-  const name  = str(fd.get("name"));
-  const color = str(fd.get("color")) || "slate";
-
-  if (!name) {
-    document.getElementById("tagErr").textContent = "Tag name is required.";
-    return;
-  }
-
-  if (!state.editingTag && state.tags.some(t => t.name === name)) {
-    document.getElementById("tagErr").textContent = "A tag with this name already exists.";
-    return;
-  }
-
-  await sbTagUpsert({ name: state.editingTag || name, color });
-  closeOverlay("tagOverlay");
-  const wasEditing = !!state.editingTag;
-  state.editingTag = null;
-  await refresh();
-  setStatus(wasEditing ? "Tag updated." : "Tag saved.");
-}
-
-async function deleteTag() {
-  if (!state.editingTag) return;
-  const name = state.editingTag;
-  await sbTagDelete(name);
-  closeOverlay("tagOverlay");
-  state.editingTag = null;
-  await refresh();
-  setStatus("Tag deleted.");
 }
 
 // ─── Utility helpers ──────────────────────────────────────────────────────────
@@ -1193,8 +1060,7 @@ function toRow(p) {
     focal_length:    p.focalLength     || "",
     uploaded_at:     p.uploadedAt      || new Date().toISOString(),
     order_timestamp: p.orderTimestamp  || Date.now(),
-    starred:         p.starred         || false,
-    tags:            p.tags            || ""
+    starred:         p.starred         || false
   };
 }
 
@@ -1216,8 +1082,7 @@ function fromRow(r) {
     focalLength:    r.focal_length,
     uploadedAt:     r.uploaded_at,
     orderTimestamp: r.order_timestamp,
-    starred:        r.starred || false,
-    tags:           r.tags || ""
+    starred:        r.starred || false
   };
 }
 
@@ -1231,26 +1096,14 @@ async function sbGetAll() {
 }
 
 async function sbUpsert(photo) {
-  const row = toRow(photo);
-  let res = await fetch(
+  const res = await fetch(
     `${SUPABASE_URL}/rest/v1/${SB_TABLE}`,
-    { method: "POST", headers: { ...SB_HDR, "Prefer": "resolution=merge-duplicates" }, body: JSON.stringify(row) }
+    { method: "POST", headers: { ...SB_HDR, "Prefer": "resolution=merge-duplicates" }, body: JSON.stringify(toRow(photo)) }
   );
-  // If the tags column doesn't exist yet (migration not run), retry without it
   if (!res.ok) {
     const msg = await res.text();
-    if (msg.includes("tags")) {
-      const { tags: _t, ...rowWithoutTags } = row;
-      res = await fetch(
-        `${SUPABASE_URL}/rest/v1/${SB_TABLE}`,
-        { method: "POST", headers: { ...SB_HDR, "Prefer": "resolution=merge-duplicates" }, body: JSON.stringify(rowWithoutTags) }
-      );
-    }
-    if (!res.ok) {
-      const errMsg = await res.text();
-      console.error("Supabase upsert failed", errMsg);
-      throw new Error(errMsg);
-    }
+    console.error("Supabase upsert failed", msg);
+    throw new Error(msg);
   }
 }
 
@@ -1323,42 +1176,3 @@ async function sbAlbumDelete(name) {
   if (!res.ok) console.error("Album delete failed", await res.text());
 }
 
-// ─── Supabase: tags ───────────────────────────────────────────────────────────
-const SB_TAGS_TABLE = "tags";
-
-function fromTagRow(r) {
-  return { name: r.name, color: r.color || "slate" };
-}
-
-function toTagRow(t) {
-  return { name: t.name, color: t.color || "slate" };
-}
-
-async function sbTagsGetAll() {
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/${SB_TAGS_TABLE}?select=*&order=name.asc`,
-    { headers: SB_HDR }
-  );
-  if (!res.ok) { console.error("Tags fetch failed", await res.text()); return []; }
-  return (await res.json()).map(fromTagRow);
-}
-
-async function sbTagUpsert(tag) {
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/${SB_TAGS_TABLE}`,
-    {
-      method:  "POST",
-      headers: { ...SB_HDR, "Prefer": "resolution=merge-duplicates" },
-      body:    JSON.stringify(toTagRow(tag))
-    }
-  );
-  if (!res.ok) console.error("Tag upsert failed", await res.text());
-}
-
-async function sbTagDelete(name) {
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/${SB_TAGS_TABLE}?name=eq.${encodeURIComponent(name)}`,
-    { method: "DELETE", headers: SB_HDR }
-  );
-  if (!res.ok) console.error("Tag delete failed", await res.text());
-}

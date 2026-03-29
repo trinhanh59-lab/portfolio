@@ -84,23 +84,6 @@
 
   <div class="divider"></div>
 
-  <!-- ═══ Tags ═══ -->
-  <section class="section" id="tags">
-    <div class="section-head reveal">
-      <div>
-        <p class="section-label">Tags</p>
-        <h2 class="section-title">Custom labels</h2>
-      </div>
-      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-        <p class="section-desc">Create tags to label and filter your work.</p>
-        <button class="btn-ghost hidden" id="newTagBtn" style="font-size:0.78rem;min-height:36px;padding:7px 16px;white-space:nowrap;">+ New Tag</button>
-      </div>
-    </div>
-    <div id="tagsWrap"></div>
-  </section>
-
-  <div class="divider"></div>
-
   <!-- ═══ Taxonomy row ═══ -->
   <div class="tax-section reveal">
     <div class="tax-row">
@@ -292,49 +275,6 @@
           <div class="meta-grid" id="detailMeta"></div>
           <div class="detail-actions" id="detailActions"></div>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══ Tag editor modal ═══ -->
-  <div class="modal-overlay" id="tagOverlay">
-    <div class="modal">
-      <div class="modal-head">
-        <div>
-          <p class="modal-head-label" id="tagModalLabel">Tag</p>
-          <h3 id="tagModalTitle">New Tag</h3>
-        </div>
-        <button class="close-btn" data-close="tagOverlay">×</button>
-      </div>
-      <div class="modal-body">
-        <form id="tagForm" class="login-grid">
-          <div class="field">
-            <label for="tagNameField">Tag name</label>
-            <input id="tagNameField" name="name" type="text" required placeholder="e.g. Golden Hour" autocomplete="off" />
-            <p class="field-note" id="tagNameNote"></p>
-          </div>
-          <div class="field">
-            <label>Color</label>
-            <div class="tag-color-picker" id="tagColorPicker">
-              <label class="tag-color-swatch" title="Slate"><input type="radio" name="color" value="slate" checked /><span class="swatch-dot" data-color="slate"></span></label>
-              <label class="tag-color-swatch" title="Blue"><input type="radio" name="color" value="blue" /><span class="swatch-dot" data-color="blue"></span></label>
-              <label class="tag-color-swatch" title="Green"><input type="radio" name="color" value="green" /><span class="swatch-dot" data-color="green"></span></label>
-              <label class="tag-color-swatch" title="Amber"><input type="radio" name="color" value="amber" /><span class="swatch-dot" data-color="amber"></span></label>
-              <label class="tag-color-swatch" title="Red"><input type="radio" name="color" value="red" /><span class="swatch-dot" data-color="red"></span></label>
-              <label class="tag-color-swatch" title="Purple"><input type="radio" name="color" value="purple" /><span class="swatch-dot" data-color="purple"></span></label>
-              <label class="tag-color-swatch" title="Pink"><input type="radio" name="color" value="pink" /><span class="swatch-dot" data-color="pink"></span></label>
-              <label class="tag-color-swatch" title="Teal"><input type="radio" name="color" value="teal" /><span class="swatch-dot" data-color="teal"></span></label>
-            </div>
-          </div>
-          <p class="error-msg" id="tagErr" aria-live="polite"></p>
-          <div style="display:flex;gap:10px;justify-content:space-between;align-items:center;">
-            <button type="button" class="btn-danger hidden" id="tagDeleteBtn"
-              style="border-radius:999px;border:1px solid rgba(224,112,112,0.35);color:var(--danger);cursor:pointer;background:transparent;padding:8px 18px;font-size:0.82rem;">
-              Delete tag
-            </button>
-            <button class="btn" type="submit">Save tag</button>
-          </div>
-        </form>
       </div>
     </div>
   </div>
