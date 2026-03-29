@@ -330,43 +330,44 @@ function setProgress(pct) {
 }
 
 // ─── Upload ───────────────────────────────────────────────────────────────────
-const RAW_EXTENSIONS = /\.(raf|cr2|cr3|nef|nrw|arw|srw|srf|orf|rw2|pef|dng|3fr|mef|mrw|rwl|x3f|iiq)$/i;
+const RAW_EXTENSIONS  = /\.(raf|cr2|cr3|nef|nrw|arw|srw|srf|orf|rw2|pef|dng|3fr|mef|mrw|rwl|x3f|iiq)$/i;
+const MAX_UPLOAD_MB   = 20;    // stay under ImageKit's 25 MB hard limit
+const MAX_DIMENSION   = 4800;  // px on longest side — enough for any display, imperceptible loss
+const COMPRESS_THRESH = 8;     // MB — files above this are automatically resized/re-encoded
 
 function isImageFile(file) {
-  if (RAW_EXTENSIONS.test(file.name)) return false; // RAW formats can't be served as web images
+  if (RAW_EXTENSIONS.test(file.name)) return false;
   return file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name);
 }
 
-// Auto-save flow: extract EXIF → upload to Cloudinary → save to Supabase.
-// No review form. Click any photo after upload to edit its details.
+// Auto-save flow: extract EXIF → prepare file (convert + compress) → upload → save to DB.
+// Individual failures are skipped; the rest of the batch continues.
 async function processFiles(files) {
   files = Array.from(files).filter(isImageFile);
   if (state.uploading || !files.length) return;
   state.uploading = true;
-  // Safety net: auto-unlock after 3 minutes so a crash never permanently blocks uploads
-  const unlockTimer = setTimeout(() => { state.uploading = false; }, 180000);
+  const unlockTimer = setTimeout(() => { state.uploading = false; }, 300000); // 5-min safety net
   setProgress(2);
-  let saved = 0;
+  let saved = 0, skipped = 0;
 
   for (let i = 0; i < files.length; i++) {
-    setStatus(`Preparing ${i + 1} of ${files.length}…`);
-    const meta = await extractMeta(files[i]); // EXIF from original before conversion
+    const label = files.length > 1 ? ` (${i + 1}/${files.length})` : "";
 
-    // Convert HEIC → JPEG if needed — skip file if it can't be converted
+    setStatus(`Reading metadata${label}…`);
+    const meta = await extractMeta(files[i]);
+
     let fileToUpload;
     try {
-      fileToUpload = await toUploadableFile(files[i]);
+      fileToUpload = await prepareFile(files[i], label);
     } catch (err) {
-      setStatus(`Skipped: ${err.message}`);
-      continue; // skip this file, keep processing others
+      setStatus(`Skipped${label}: ${err.message}`);
+      skipped++;
+      continue;
     }
 
-    setStatus(`Uploading ${i + 1} of ${files.length}…`);
+    setStatus(`Uploading${label}…`);
     try {
-      const rawExt  = fileToUpload.name.split(".").pop().toLowerCase();
-      const safeExt = /^(jpg|jpeg|png|gif|webp|avif)$/.test(rawExt) ? rawExt : "jpg";
-      const ikName  = `${meta.id}.${safeExt}`;
-
+      const ikName = `${meta.id}.jpg`;
       const ikForm = new FormData();
       ikForm.append("file",              fileToUpload);
       ikForm.append("fileName",          ikName);
@@ -379,25 +380,22 @@ async function processFiles(files) {
         body: ikForm
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Upload failed");
+      if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
       meta.cloudinaryId = data.filePath;
     } catch (err) {
-      setStatus(`Upload failed: ${err.message}`);
-      setProgress(100);
-      clearTimeout(unlockTimer);
-      state.uploading = false;
-      return;
+      setStatus(`Upload failed${label}: ${err.message}`);
+      skipped++;
+      continue; // keep going with remaining files
     }
 
     try {
       await sbUpsert(meta);
     } catch (err) {
-      setStatus(`Save failed: ${err.message}`);
-      setProgress(100);
-      clearTimeout(unlockTimer);
-      state.uploading = false;
-      return;
+      setStatus(`Save failed${label}: ${err.message}`);
+      skipped++;
+      continue;
     }
+
     saved++;
     setProgress(2 + Math.round((i + 1) / files.length * 96));
   }
@@ -406,52 +404,101 @@ async function processFiles(files) {
   setProgress(100);
   state.uploading = false;
   await refresh();
-  setStatus(saved > 0
-    ? `${saved} photo${saved === 1 ? "" : "s"} added. Tap any photo to edit details.`
-    : "No photos were saved. Check the file format and try again.");
+  if (saved > 0 && skipped === 0) {
+    setStatus(`${saved} photo${saved === 1 ? "" : "s"} added. Tap any photo to edit details.`);
+  } else if (saved > 0) {
+    setStatus(`${saved} added, ${skipped} skipped. Tap any photo to edit details.`);
+  } else {
+    setStatus("No photos were saved. Check the file format and try again.");
+  }
 }
 
-// Convert HEIC/HEIF → JPEG before upload (ImageKit free plan rejects HEIC).
-// Canvas first (instant on Safari which renders HEIC natively), then heic2any
-// with a hard timeout as fallback for Chrome/Firefox.
-async function toUploadableFile(file) {
+// Prepare a file for upload:
+//   1. HEIC/HEIF → JPEG (ImageKit rejects HEIC on free plan)
+//   2. Compress if oversized in bytes or dimensions (canvas resize + re-encode)
+// Always returns a JPEG File ready to POST.
+async function prepareFile(file, label = "") {
+  // Step 1: get a decodable blob — converts HEIC, passes everything else through
+  let blob = await heicToBlob(file);
+
+  // Step 2: determine if compression is needed
+  //   - any file over COMPRESS_THRESH MB
+  //   - PNG images (photos stored as PNG are always larger than equivalent JPEG)
+  //   - anything over MAX_UPLOAD_MB must be reduced regardless
+  const isBig = blob.size > COMPRESS_THRESH * 1024 * 1024;
+  const isPng = blob.type === "image/png";
+
+  if (isBig || isPng) {
+    setStatus(`Compressing${label}…`);
+    blob = await compressImage(blob);
+  }
+
+  const baseName = file.name.replace(/\.[^.]+$/, "");
+  return new File([blob], `${baseName || "photo"}.jpg`, { type: "image/jpeg" });
+}
+
+// Decode HEIC/HEIF to a JPEG blob. Non-HEIC files are returned as-is.
+async function heicToBlob(file) {
   const isHeic = /\.(heic|heif)$/i.test(file.name)
               || file.type === "image/heic"
               || file.type === "image/heif";
   if (!isHeic) return file;
 
-  setStatus("Converting image…");
-  const newName = (file.name.replace(/\.(heic|heif)$/i, "") || "photo") + ".jpg";
+  setStatus("Converting HEIC…");
 
-  // Method 1: canvas via createImageBitmap — instant on Safari (native HEIC support)
+  // Safari natively decodes HEIC via createImageBitmap
   try {
     const bitmap = await createImageBitmap(file);
     const canvas = Object.assign(document.createElement("canvas"),
       { width: bitmap.width, height: bitmap.height });
     canvas.getContext("2d").drawImage(bitmap, 0, 0);
-    const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.88));
-    if (blob && blob.size > 1000) {
-      return new File([blob], newName, { type: "image/jpeg" });
-    }
-  } catch (_) { /* not supported in this browser — try heic2any */ }
+    const blob = await canvasToBlob(canvas, "image/jpeg", 0.92);
+    if (blob && blob.size > 1000) return blob;
+  } catch (_) { /* Safari not available — fall through to heic2any */ }
 
-  // Method 2: heic2any with 25s timeout (Chrome/Firefox have no native HEIC support)
+  // Chrome / Firefox: heic2any library with a hard timeout
   if (window.heic2any) {
     try {
-      const timeout = new Promise((_, rej) =>
-        setTimeout(() => rej(new Error("heic2any timed out")), 25000));
-      const out  = await Promise.race([
-        window.heic2any({ blob: file, toType: "image/jpeg", quality: 0.88 }),
-        timeout
+      const out = await Promise.race([
+        window.heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("heic2any timed out")), 30000))
       ]);
       const blob = Array.isArray(out) ? out[0] : out;
-      if (blob && blob.size > 1000) {
-        return new File([blob], newName, { type: "image/jpeg" });
-      }
-    } catch (_) { /* timed out or failed */ }
+      if (blob && blob.size > 1000) return blob;
+    } catch (_) { /* timed out or conversion error */ }
   }
 
-  throw new Error("HEIC conversion failed. In the iPhone Photos app, share the photo → select JPEG, then re-upload.");
+  throw new Error("HEIC conversion failed. Share the photo as JPEG from the Photos app and re-upload.");
+}
+
+// Canvas-based resize + re-encode.
+// Scales the image down so its longest side ≤ MAX_DIMENSION, then encodes as JPEG.
+// Iterates through lower quality levels until the file fits under MAX_UPLOAD_MB.
+async function compressImage(blob) {
+  const bitmap = await createImageBitmap(blob);
+  let w = bitmap.width, h = bitmap.height;
+
+  if (w > MAX_DIMENSION || h > MAX_DIMENSION) {
+    const scale = MAX_DIMENSION / Math.max(w, h);
+    w = Math.round(w * scale);
+    h = Math.round(h * scale);
+  }
+
+  const canvas = Object.assign(document.createElement("canvas"), { width: w, height: h });
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+
+  const limitBytes = MAX_UPLOAD_MB * 1024 * 1024;
+  for (const q of [0.88, 0.82, 0.75, 0.65, 0.55]) {
+    const out = await canvasToBlob(canvas, "image/jpeg", q);
+    if (out && (out.size <= limitBytes || q === 0.55)) return out;
+  }
+  return canvasToBlob(canvas, "image/jpeg", 0.55);
+}
+
+// Promisified canvas.toBlob
+function canvasToBlob(canvas, type, quality) {
+  return new Promise(resolve => canvas.toBlob(resolve, type, quality));
 }
 
 // Extract all EXIF/GPS/IPTC from a file without opening any modal.
