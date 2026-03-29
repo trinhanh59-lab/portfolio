@@ -10,7 +10,7 @@ const SITE = {
   instagramUrl:  "https://instagram.com/"
 };
 
-const OWNER_PASSWORD = "change-this-password"; // ← change before publishing
+const OWNER_PASSWORD = "1077";
 
 // ─── ImageKit ─────────────────────────────────────────────────────────────────
 const IMAGEKIT_ID          = "sphopalr1";
