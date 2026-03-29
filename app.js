@@ -93,7 +93,8 @@ const state = {
   pendingDeleteId: null,
   editingAlbum:    null,    // name of album being edited, or null for new
   tags:            [],
-  editingTag:      null     // name of tag being edited, or null for new
+  editingTag:      null,    // name of tag being edited, or null for new
+  uploading:       false    // prevents concurrent/duplicate upload calls
 };
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -183,7 +184,7 @@ function bindEvents() {
   dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("over"); });
   dz.addEventListener("dragleave", () => dz.classList.remove("over"));
   dz.addEventListener("drop", e => {
-    e.preventDefault(); dz.classList.remove("over");
+    e.preventDefault(); e.stopPropagation(); dz.classList.remove("over");
     const files = Array.from(e.dataTransfer.files).filter(isImageFile);
     if (files.length) processFiles(files);
   });
@@ -359,14 +360,25 @@ function setProgress(pct) {
 }
 
 // ─── Upload ───────────────────────────────────────────────────────────────────
+const RAW_EXTENSIONS = /\.(raf|cr2|cr3|nef|nrw|arw|srw|srf|orf|rw2|pef|dng|3fr|mef|mrw|rwl|x3f|iiq)$/i;
+
 function isImageFile(file) {
+  if (RAW_EXTENSIONS.test(file.name)) return false; // RAW formats can't be served as web images
   return file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name);
 }
 
 // Auto-save flow: extract EXIF → upload to Cloudinary → save to Supabase.
 // No review form. Click any photo after upload to edit its details.
 async function processFiles(files) {
-  if (!files.length) return;
+  if (state.uploading || !files.length) return;
+  // Check for RAW files and warn
+  const rawFiles = Array.from(files).filter(f => RAW_EXTENSIONS.test(f.name));
+  if (rawFiles.length) {
+    setStatus(`Skipped ${rawFiles.length} RAW file(s) — upload JPEGs or HEICs instead.`);
+    files = files.filter(f => !RAW_EXTENSIONS.test(f.name));
+    if (!files.length) return;
+  }
+  state.uploading = true;
   setProgress(2);
   let saved = 0;
 
@@ -393,6 +405,7 @@ async function processFiles(files) {
     } catch (err) {
       setStatus(`Upload failed: ${err.message}`);
       setProgress(100);
+      state.uploading = false;
       return;
     }
 
@@ -401,6 +414,7 @@ async function processFiles(files) {
     } catch (err) {
       setStatus(`Save failed: ${err.message}`);
       setProgress(100);
+      state.uploading = false;
       return;
     }
     saved++;
@@ -408,6 +422,7 @@ async function processFiles(files) {
   }
 
   setProgress(100);
+  state.uploading = false;
   await refresh();
   setStatus(`${saved} photo${saved === 1 ? "" : "s"} added. Tap any photo to edit details.`);
 }
@@ -435,18 +450,21 @@ async function extractMeta(file) {
   const rawDate = exif.DateTimeOriginal || exif.CreateDate || exif.DateTime || exif.DateTimeDigitized;
   const dateTaken = fmtDateInput(rawDate);
 
+  // Strip null bytes and non-printable characters (common in Fujifilm/older cameras)
+  const clean = v => str(v).replace(/[\0-\x1F\x7F-\x9F]/g, "").trim();
+
   // Camera — deduplicate "Canon Canon EOS R5" patterns
-  const make  = str(exif.Make  || "").replace(/\0/g, "").trim();
-  const model = str(exif.Model || "").replace(/\0/g, "").trim();
+  const make  = clean(exif.Make  || "");
+  const model = clean(exif.Model || "");
   const camera = model.toLowerCase().startsWith(make.toLowerCase()) ? model : compact([make, model]);
 
   // Lens, ISO — multiple tag aliases across manufacturers
-  const lens    = str(exif.LensModel || exif.Lens || exif.LensInfo || "");
+  const lens    = clean(exif.LensModel || exif.Lens || exif.LensInfo || "");
   const isoRaw  = exif.ISO ?? exif.ISOSpeedRatings ?? exif.PhotographicSensitivity;
 
   // Title / description from embedded IPTC / XMP (e.g. Lightroom captions)
-  const embeddedTitle = str(exif.ObjectName || exif.Headline || exif.Title || "");
-  const embeddedDesc  = str(exif.ImageDescription || exif.Description || exif["Caption-Abstract"] || exif.Caption || "");
+  const embeddedTitle = clean(exif.ObjectName || exif.Headline || exif.Title || "");
+  const embeddedDesc  = clean(exif.ImageDescription || exif.Description || exif["Caption-Abstract"] || exif.Caption || "");
 
   return {
     id:             genId(),
