@@ -349,17 +349,18 @@ async function processFiles(files) {
 
   for (let i = 0; i < files.length; i++) {
     setStatus(`Extracting metadata (${i + 1}/${files.length})…`);
-    const meta = await extractMeta(files[i]);
+    const meta = await extractMeta(files[i]); // EXIF from original before any conversion
 
     setStatus(`Uploading ${i + 1} of ${files.length}…`);
     try {
-      // Preserve file extension so ImageKit knows the format (critical for HEIC)
-      const rawExt = files[i].name.split(".").pop().toLowerCase();
+      // Convert HEIC → JPEG if needed, then derive extension for ImageKit
+      const fileToUpload = await toUploadableFile(files[i]);
+      const rawExt  = fileToUpload.name.split(".").pop().toLowerCase();
       const safeExt = /^(jpg|jpeg|png|gif|webp|heic|heif|avif)$/.test(rawExt) ? rawExt : "jpg";
       const ikName  = `${meta.id}.${safeExt}`;
 
       const ikForm = new FormData();
-      ikForm.append("file",              files[i]);
+      ikForm.append("file",              fileToUpload);
       ikForm.append("fileName",          ikName);
       ikForm.append("useUniqueFileName", "false");
       ikForm.append("folder",            "/portfolio");
@@ -395,6 +396,20 @@ async function processFiles(files) {
   state.uploading = false;
   await refresh();
   setStatus(`${saved} photo${saved === 1 ? "" : "s"} added. Tap any photo to edit details.`);
+}
+
+// Convert HEIC/HEIF → JPEG before upload (ImageKit free plan rejects HEIC input)
+async function toUploadableFile(file) {
+  const isHeic = /\.(heic|heif)$/i.test(file.name) || file.type === "image/heic" || file.type === "image/heif";
+  if (!isHeic) return file;
+  try {
+    const blob = await window.heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
+    const result = Array.isArray(blob) ? blob[0] : blob;
+    return new File([result], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
+  } catch (err) {
+    console.warn("HEIC→JPEG conversion failed, uploading original:", err);
+    return file;
+  }
 }
 
 // Extract all EXIF/GPS/IPTC from a file without opening any modal.
