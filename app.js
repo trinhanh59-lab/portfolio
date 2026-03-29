@@ -238,6 +238,10 @@ function bindEvents() {
       state.searchQ = "";
       document.getElementById("searchInput").value = "";
       renderFilters(); renderGallery();
+      // Scroll to gallery when coming from a collection tile
+      if (sf.closest(".series-tile")) {
+        document.getElementById("gallery").scrollIntoView({ behavior: "smooth" });
+      }
       return;
     }
     // Starred filter chip
@@ -688,6 +692,23 @@ function closeReview() {
   closeOverlay("reviewOverlay");
 }
 
+// ─── Hero cover ───────────────────────────────────────────────────────────────
+// Sets the magazine-cover hero background to the first starred photo,
+// falling back to the most recent photo if none are starred.
+function renderHero() {
+  const cover = state.photos.find(p => p.starred && p.cloudinaryId)
+             || state.photos.find(p => p.cloudinaryId);
+  const el = document.getElementById("heroCoverImg");
+  if (!el) return;
+  if (cover) {
+    el.style.backgroundImage = `url('${cloudinaryUrl(cover.cloudinaryId, "w_2400,q_70,f_auto")}')`;
+    el.classList.add("has-photo");
+  } else {
+    el.style.backgroundImage = "";
+    el.classList.remove("has-photo");
+  }
+}
+
 // ─── Refresh ──────────────────────────────────────────────────────────────────
 async function refresh() {
   [state.photos, state.albums] = await Promise.all([sbGetAll(), sbAlbumsGetAll()]);
@@ -698,6 +719,7 @@ async function refresh() {
   if (state.activeAlbum !== "all" && state.activeAlbum !== "starred" && !allNames.has(state.activeAlbum)) {
     state.activeAlbum = "all";
   }
+  renderHero();
   renderStats();
   renderSeries();
   renderTax();

@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#080808" />
+  <meta name="theme-color" content="#0a0a09" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Anh Trinh</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,300;0,400;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,300;0,400;1,300;1,400&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -18,7 +18,7 @@
   <nav class="nav" id="mainNav">
     <a class="nav-brand" href="#top">Anh Trinh</a>
     <div class="nav-links">
-      <a href="#albums" class="nav-mobile">Albums</a>
+      <a href="#collections">Collections</a>
       <a href="#gallery">Work</a>
       <a href="#about">About</a>
       <a href="#contact">Contact</a>
@@ -26,65 +26,67 @@
     </div>
   </nav>
 
-  <!-- ═══ Hero ═══ -->
+  <!-- ═══ Hero / Magazine Cover ═══ -->
   <section class="hero" id="top">
-    <div class="hero-bg"></div>
+    <div class="hero-cover-img" id="heroCoverImg"></div>
+    <div class="hero-overlay"></div>
 
-    <div class="hero-content">
-      <p class="hero-eyebrow">Photography · San Francisco Bay Area</p>
-      <h1 class="hero-title">Photographs<br>made with <em>intention.</em></h1>
-      <p class="hero-sub">A personal archive of selected work — landscapes, moments, and the details that make a frame worth keeping.</p>
-      <div class="hero-actions">
-        <a class="btn" href="#gallery">View work</a>
-        <button class="btn-ghost hidden" id="heroUploadBtn">Upload photos</button>
+    <div class="hero-floor">
+      <div class="hero-floor-left">
+        <p class="hero-eyebrow">Photography · San Francisco Bay Area</p>
+        <h1 class="hero-title">Photographs<br>made with <em>intention.</em></h1>
+        <div class="hero-actions">
+          <a class="hero-enter" href="#collections">
+            <span class="hero-enter-line"></span>
+            <span>Enter</span>
+          </a>
+          <button class="btn-ghost hidden" id="heroUploadBtn">Upload photos</button>
+        </div>
       </div>
-    </div>
-
-    <div class="hero-stats">
-      <div>
-        <div class="hero-stat-num" id="statPhotos">0</div>
-        <div class="hero-stat-label">Photographs</div>
-      </div>
-      <div>
-        <div class="hero-stat-num" id="statAlbums">0</div>
-        <div class="hero-stat-label">Albums</div>
-      </div>
-      <div>
-        <div class="hero-stat-num" id="statCameras">0</div>
-        <div class="hero-stat-label">Cameras</div>
+      <div class="hero-floor-right">
+        <div class="hero-stat">
+          <span class="hero-stat-num" id="statPhotos">—</span>
+          <span class="hero-stat-label">Photographs</span>
+        </div>
+        <div class="hero-stat">
+          <span class="hero-stat-num" id="statAlbums">—</span>
+          <span class="hero-stat-label">Collections</span>
+        </div>
+        <div class="hero-stat">
+          <span class="hero-stat-num" id="statCameras">—</span>
+          <span class="hero-stat-label">Cameras</span>
+        </div>
       </div>
     </div>
 
     <div class="scroll-hint">
-      <span>Scroll</span>
       <div class="scroll-hint-line"></div>
+      <span>Scroll</span>
     </div>
   </section>
 
-  <div class="divider"></div>
-
-  <!-- ═══ Albums ═══ -->
-  <section class="section" id="albums">
-    <div class="section-head reveal">
-      <div>
-        <p class="section-label">Albums</p>
-        <h2 class="section-title">Ongoing bodies<br>of work</h2>
-      </div>
-      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+  <!-- ═══ Collections ═══ -->
+  <section class="section" id="collections">
+    <div class="section-rule reveal">
+      <span class="rule-num">01</span>
+      <div class="rule-line"></div>
+      <span class="rule-label">Collections</span>
+    </div>
+    <div class="section-intro reveal">
+      <h2 class="section-display">Ongoing<br>bodies of work</h2>
+      <div class="section-intro-aside">
         <p class="section-desc">Tag photos with an album name to group your work.</p>
-        <button class="btn-ghost hidden" id="newAlbumBtn" style="font-size:0.78rem;min-height:36px;padding:7px 16px;white-space:nowrap;">+ New Album</button>
+        <button class="btn-ghost hidden" id="newAlbumBtn">+ New Album</button>
       </div>
     </div>
     <div id="seriesWrap" class="stagger">
-      <div style="border:1px dashed var(--line);border-radius:12px;padding:32px;color:var(--muted);font-size:0.88rem;">
-        Albums will appear after uploading photos with an album tag.
+      <div class="empty-placeholder">
+        Albums appear after uploading photos with an album tag.
       </div>
     </div>
   </section>
 
-  <div class="divider"></div>
-
-  <!-- ═══ Taxonomy row ═══ -->
+  <!-- ═══ Taxonomy ═══ -->
   <div class="tax-section reveal">
     <div class="tax-row">
       <div class="tax-card">
@@ -104,32 +106,36 @@
 
   <!-- ═══ Gallery ═══ -->
   <section class="section" id="gallery">
-    <div class="section-head reveal">
-      <div>
-        <p class="section-label">Portfolio</p>
-        <h2 class="section-title">Selected work</h2>
-      </div>
+    <div class="section-rule reveal">
+      <span class="rule-num">02</span>
+      <div class="rule-line"></div>
+      <span class="rule-label">Selected work</span>
+    </div>
+    <div class="section-intro reveal">
+      <h2 class="section-display">Selected<br>photographs</h2>
     </div>
 
     <!-- Drop zone (owner only) -->
     <div class="drop-zone" id="dropZone">
-      <div class="drop-icon">📷</div>
+      <div class="drop-icon">↑</div>
       <strong>Drop photos here</strong>
-      <p>or use the Upload button · JPG PNG HEIC WEBP</p>
+      <p>JPG · PNG · HEIC · WEBP · or use the Upload button below</p>
     </div>
 
     <!-- Controls -->
     <div class="gallery-controls-row">
       <div class="filter-pills" id="filterPills"></div>
-      <div class="search-wrap">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        <input class="search-input" id="searchInput" type="search" placeholder="Search…" autocomplete="off" />
+      <div class="gallery-controls-right">
+        <div class="search-wrap">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <input class="search-input" id="searchInput" type="search" placeholder="Search…" autocomplete="off" />
+        </div>
+        <select class="sort-sel" id="sortSel">
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+          <option value="title">A–Z</option>
+        </select>
       </div>
-      <select class="sort-sel" id="sortSel">
-        <option value="newest">Newest</option>
-        <option value="oldest">Oldest</option>
-        <option value="title">A–Z</option>
-      </select>
     </div>
 
     <div id="galleryWrap">
@@ -141,35 +147,41 @@
     </div>
   </section>
 
-  <div class="divider"></div>
-
   <!-- ═══ About ═══ -->
-  <section class="section" id="about">
-    <div class="reveal">
-      <p class="section-label">About</p>
-      <h2 class="section-title" id="aboutHeadline">Based in the<br>San Francisco Bay Area.</h2>
+  <section class="section section-about" id="about">
+    <div class="section-rule reveal">
+      <span class="rule-num">03</span>
+      <div class="rule-line"></div>
+      <span class="rule-label">About</span>
     </div>
-    <div class="reveal" style="transition-delay:0.12s;">
-      <p class="about-tagline">"Light, place, and the quiet in-between."</p>
-      <p class="about-body" id="aboutText">
-        I photograph what catches my eye — light, place, and the quiet in-between moments. This portfolio is a running collection of work I'm proud of, organized by album and shot with whatever camera felt right.
-      </p>
-      <div class="about-links">
-        <a class="btn" href="mailto:Trinhanh59@gmail.com" id="contactEmailBtn">Get in touch</a>
-        <a class="btn-ghost" href="https://instagram.com/" target="_blank" rel="noreferrer" id="igBtn">Instagram</a>
+    <div class="about-grid">
+      <div class="reveal">
+        <h2 class="section-display" id="aboutHeadline">Based in the<br>San Francisco Bay Area.</h2>
+      </div>
+      <div class="reveal" style="transition-delay:0.1s;">
+        <p class="about-tagline">"Light, place, and the quiet in-between."</p>
+        <p class="about-body" id="aboutText">
+          I photograph what catches my eye — light, place, and the quiet in-between moments. This portfolio is a running collection of work I'm proud of, organized by album and shot with whatever camera felt right.
+        </p>
+        <div class="about-links">
+          <a class="btn" href="mailto:Trinhanh59@gmail.com" id="contactEmailBtn">Get in touch</a>
+          <a class="btn-ghost" href="https://instagram.com/" target="_blank" rel="noreferrer" id="igBtn">Instagram</a>
+        </div>
       </div>
     </div>
   </section>
 
-  <div class="divider"></div>
-
   <!-- ═══ Contact ═══ -->
   <section class="section" id="contact">
-    <div class="reveal" style="text-align:center; max-width:700px; margin:0 auto;">
-      <p class="section-label">Contact</p>
-      <h2 class="contact-title">Open to commissions,<br>prints &amp; collaborations.</h2>
-      <p class="contact-sub">Available for work in the Bay Area and beyond.</p>
-      <div class="contact-actions">
+    <div class="contact-inner">
+      <div class="section-rule reveal">
+        <span class="rule-num">04</span>
+        <div class="rule-line"></div>
+        <span class="rule-label">Contact</span>
+      </div>
+      <h2 class="contact-display reveal">Open to commissions,<br>prints &amp; collaborations.</h2>
+      <p class="contact-sub reveal" style="transition-delay:0.08s;">Available for work in the Bay Area and beyond.</p>
+      <div class="contact-actions reveal" style="transition-delay:0.16s;">
         <a class="btn" href="mailto:Trinhanh59@gmail.com">Trinhanh59@gmail.com</a>
         <a class="btn-ghost" href="https://instagram.com/" target="_blank" rel="noreferrer">Instagram</a>
       </div>
@@ -185,7 +197,7 @@
   <div class="owner-bar" id="ownerBar">
     <div class="owner-shell">
       <div class="owner-info">
-        <strong><span class="owner-dot"></span>Owner mode on</strong>
+        <strong><span class="owner-dot"></span>Owner mode</strong>
         <p>Upload, edit, or delete photos. Drag photos to drop them in.</p>
         <div class="upload-progress" id="uploadProgress">
           <div class="upload-progress-fill" id="progressFill"></div>
@@ -193,17 +205,15 @@
       </div>
       <div class="owner-actions">
         <span class="status-txt" id="statusTxt">Ready.</span>
-        <!-- Standard file picker (library) -->
-        <label class="upload-btn btn-ghost" style="min-height:38px;padding:8px 18px;font-size:0.8rem;cursor:pointer;">
+        <label class="upload-btn btn-ghost">
           Upload photos
           <input id="uploadInput" type="file" accept="image/*,.heic,.heif" multiple style="display:none;" />
         </label>
-        <!-- Camera capture (prominent on mobile) -->
-        <label class="upload-btn btn-ghost mobile-camera-btn" style="min-height:38px;padding:8px 18px;font-size:0.8rem;cursor:pointer;" title="Take a photo with your camera">
+        <label class="upload-btn btn-ghost mobile-camera-btn" title="Take a photo with your camera">
           📷 Camera
           <input id="cameraInput" type="file" accept="image/*,.heic,.heif" capture="environment" style="display:none;" />
         </label>
-        <button class="btn-quiet" id="signOutBtn" style="min-height:38px;padding:8px 18px;font-size:0.8rem;">Sign out</button>
+        <button class="btn-quiet" id="signOutBtn">Sign out</button>
       </div>
     </div>
   </div>
