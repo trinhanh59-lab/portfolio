@@ -668,7 +668,7 @@ function renderSeries() {
 
   wrap.innerHTML = `<div class="series-grid">${groups.map(g => {
     const bgLayer = g.cover
-      ? `<div class="series-tile-bg" style="background-image:url('${cloudinaryUrl(g.cover, "w_600,q_auto,f_auto,c_fill,h_400")}')"></div>
+      ? `<div class="series-tile-bg" style="background-image:url('${cloudinaryUrl(g.cover, "w_600,q_auto,f_auto")}')"></div>
          <div class="series-tile-cover-overlay"></div>`
       : "";
     const editBtn = state.ownerMode
@@ -1031,11 +1031,11 @@ function cloudinaryUrl(filePath, transforms) {
   if (!transforms) return `${IMAGEKIT_BASE_URL}${path}`;
   // Map Cloudinary transform syntax → ImageKit syntax
   const ikTransforms = transforms
-    .replace(/fl_attachment[^,]*/g, "") // handled separately via ik-attachment
-    .replace(/c_fill/g, "cm-pad_resize")
-    .replace(/(\w+)_/g, "$1-")          // w_600 → w-600, q_auto → q-auto, etc.
-    .replace(/^,|,$/g, "")             // trim leading/trailing commas
-    .replace(/,,+/g, ",");             // collapse double commas
+    .replace(/fl_attachment[^,]*/g, "") // handled separately via ik-attachment query param
+    .replace(/c_fill,?/g, "")          // CSS handles cropping; drop c_fill
+    .replace(/([a-z]{1,2})_/g, "$1-") // w_600 → w-600, q_auto → q-auto, f_auto → f-auto
+    .replace(/^,|,$/g, "")            // trim leading/trailing commas
+    .replace(/,,+/g, ",");            // collapse double commas
   return ikTransforms
     ? `${IMAGEKIT_BASE_URL}/tr:${ikTransforms}${path}`
     : `${IMAGEKIT_BASE_URL}${path}`;
