@@ -370,14 +370,9 @@ function isImageFile(file) {
 // Auto-save flow: extract EXIF → upload to Cloudinary → save to Supabase.
 // No review form. Click any photo after upload to edit its details.
 async function processFiles(files) {
+  // Silently filter to web-compatible images only (JPEGs, HEICs, PNGs, WEBPs)
+  files = Array.from(files).filter(isImageFile);
   if (state.uploading || !files.length) return;
-  // Check for RAW files and warn
-  const rawFiles = Array.from(files).filter(f => RAW_EXTENSIONS.test(f.name));
-  if (rawFiles.length) {
-    setStatus(`Skipped ${rawFiles.length} RAW file(s) — upload JPEGs or HEICs instead.`);
-    files = files.filter(f => !RAW_EXTENSIONS.test(f.name));
-    if (!files.length) return;
-  }
   state.uploading = true;
   setProgress(2);
   let saved = 0;
@@ -1236,18 +1231,26 @@ async function sbGetAll() {
 }
 
 async function sbUpsert(photo) {
-  const res = await fetch(
+  const row = toRow(photo);
+  let res = await fetch(
     `${SUPABASE_URL}/rest/v1/${SB_TABLE}`,
-    {
-      method:  "POST",
-      headers: { ...SB_HDR, "Prefer": "resolution=merge-duplicates" },
-      body:    JSON.stringify(toRow(photo))
-    }
+    { method: "POST", headers: { ...SB_HDR, "Prefer": "resolution=merge-duplicates" }, body: JSON.stringify(row) }
   );
+  // If the tags column doesn't exist yet (migration not run), retry without it
   if (!res.ok) {
     const msg = await res.text();
-    console.error("Supabase upsert failed", msg);
-    throw new Error(msg);
+    if (msg.includes("tags")) {
+      const { tags: _t, ...rowWithoutTags } = row;
+      res = await fetch(
+        `${SUPABASE_URL}/rest/v1/${SB_TABLE}`,
+        { method: "POST", headers: { ...SB_HDR, "Prefer": "resolution=merge-duplicates" }, body: JSON.stringify(rowWithoutTags) }
+      );
+    }
+    if (!res.ok) {
+      const errMsg = await res.text();
+      console.error("Supabase upsert failed", errMsg);
+      throw new Error(errMsg);
+    }
   }
 }
 
