@@ -353,9 +353,14 @@ async function processFiles(files) {
 
     setStatus(`Uploading ${i + 1} of ${files.length}…`);
     try {
+      // Preserve file extension so ImageKit knows the format (critical for HEIC)
+      const rawExt = files[i].name.split(".").pop().toLowerCase();
+      const safeExt = /^(jpg|jpeg|png|gif|webp|heic|heif|avif)$/.test(rawExt) ? rawExt : "jpg";
+      const ikName  = `${meta.id}.${safeExt}`;
+
       const ikForm = new FormData();
       ikForm.append("file",              files[i]);
-      ikForm.append("fileName",          meta.id);
+      ikForm.append("fileName",          ikName);
       ikForm.append("useUniqueFileName", "false");
       ikForm.append("folder",            "/portfolio");
       const auth = btoa(IMAGEKIT_PRIVATE_KEY + ":");
