@@ -396,7 +396,13 @@ async function processFiles(files) {
       return;
     }
 
-    await sbUpsert(meta);
+    try {
+      await sbUpsert(meta);
+    } catch (err) {
+      setStatus(`Save failed: ${err.message}`);
+      setProgress(100);
+      return;
+    }
     saved++;
     setProgress(2 + Math.round((i + 1) / files.length * 96));
   }
@@ -1220,7 +1226,11 @@ async function sbUpsert(photo) {
       body:    JSON.stringify(toRow(photo))
     }
   );
-  if (!res.ok) console.error("Supabase upsert failed", await res.text());
+  if (!res.ok) {
+    const msg = await res.text();
+    console.error("Supabase upsert failed", msg);
+    throw new Error(msg);
+  }
 }
 
 async function sbDelete(id) {
