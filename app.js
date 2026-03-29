@@ -340,10 +340,11 @@ function isImageFile(file) {
 // Auto-save flow: extract EXIF → upload to Cloudinary → save to Supabase.
 // No review form. Click any photo after upload to edit its details.
 async function processFiles(files) {
-  // Silently filter to web-compatible images only (JPEGs, HEICs, PNGs, WEBPs)
   files = Array.from(files).filter(isImageFile);
   if (state.uploading || !files.length) return;
   state.uploading = true;
+  // Safety net: auto-unlock after 3 minutes so a crash never permanently blocks uploads
+  const unlockTimer = setTimeout(() => { state.uploading = false; }, 180000);
   setProgress(2);
   let saved = 0;
 
@@ -383,6 +384,7 @@ async function processFiles(files) {
     } catch (err) {
       setStatus(`Upload failed: ${err.message}`);
       setProgress(100);
+      clearTimeout(unlockTimer);
       state.uploading = false;
       return;
     }
@@ -392,6 +394,7 @@ async function processFiles(files) {
     } catch (err) {
       setStatus(`Save failed: ${err.message}`);
       setProgress(100);
+      clearTimeout(unlockTimer);
       state.uploading = false;
       return;
     }
@@ -399,10 +402,13 @@ async function processFiles(files) {
     setProgress(2 + Math.round((i + 1) / files.length * 96));
   }
 
+  clearTimeout(unlockTimer);
   setProgress(100);
   state.uploading = false;
   await refresh();
-  setStatus(`${saved} photo${saved === 1 ? "" : "s"} added. Tap any photo to edit details.`);
+  setStatus(saved > 0
+    ? `${saved} photo${saved === 1 ? "" : "s"} added. Tap any photo to edit details.`
+    : "No photos were saved. Check the file format and try again.");
 }
 
 // Convert HEIC/HEIF → JPEG before upload (ImageKit free plan rejects HEIC).
