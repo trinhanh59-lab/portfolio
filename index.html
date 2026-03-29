@@ -25,42 +25,42 @@
     </div>
   </nav>
 
-  <!-- ═══ Hero / Magazine Cover ═══ -->
+  <!-- ═══ Hero / Gallery Wall ═══ -->
   <section class="hero" id="top">
-    <div class="hero-cover-img" id="heroCoverImg"></div>
-    <div class="hero-overlay"></div>
-
-    <div class="hero-floor">
-      <div class="hero-floor-left">
+    <!-- Left: editorial text on washi -->
+    <div class="hero-left">
+      <div class="hero-left-body">
         <p class="hero-eyebrow">Photography · San Francisco Bay Area</p>
         <h1 class="hero-title">Photographs<br>made with <em>intention.</em></h1>
+      </div>
+      <div class="hero-left-foot">
         <div class="hero-actions">
           <a class="hero-enter" href="#collections">
             <span class="hero-enter-line"></span>
             <span>Enter</span>
           </a>
-          <button class="btn-ghost hidden" id="heroUploadBtn">Upload photos</button>
+          <button class="btn-ghost hidden" id="heroUploadBtn">Upload</button>
         </div>
-      </div>
-      <div class="hero-floor-right">
-        <div class="hero-stat">
-          <span class="hero-stat-num" id="statPhotos">—</span>
-          <span class="hero-stat-label">Photographs</span>
-        </div>
-        <div class="hero-stat">
-          <span class="hero-stat-num" id="statAlbums">—</span>
-          <span class="hero-stat-label">Collections</span>
-        </div>
-        <div class="hero-stat">
-          <span class="hero-stat-num" id="statCameras">—</span>
-          <span class="hero-stat-label">Cameras</span>
+        <div class="hero-stats-row">
+          <div class="hero-stat">
+            <span class="hero-stat-num" id="statPhotos">—</span>
+            <span class="hero-stat-label">Photographs</span>
+          </div>
+          <div class="hero-stat">
+            <span class="hero-stat-num" id="statAlbums">—</span>
+            <span class="hero-stat-label">Collections</span>
+          </div>
+          <div class="hero-stat">
+            <span class="hero-stat-num" id="statCameras">—</span>
+            <span class="hero-stat-label">Cameras</span>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="scroll-hint">
-      <div class="scroll-hint-line"></div>
-      <span>Scroll</span>
+    <!-- Right: gallery wall — full uncropped photo -->
+    <div class="hero-right">
+      <img class="hero-photo" id="heroCoverImg" alt="Featured photograph" />
     </div>
   </section>
 

@@ -701,11 +701,9 @@ function renderHero() {
   const el = document.getElementById("heroCoverImg");
   if (!el) return;
   if (cover) {
-    el.style.backgroundImage = `url('${cloudinaryUrl(cover.cloudinaryId, "w_2400,q_70,f_auto")}')`;
-    el.classList.add("has-photo");
+    el.src = cloudinaryUrl(cover.cloudinaryId, "w_1600,q_80,f_auto");
   } else {
-    el.style.backgroundImage = "";
-    el.classList.remove("has-photo");
+    el.src = "";
   }
 }
 
