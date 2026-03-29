@@ -348,15 +348,22 @@ async function processFiles(files) {
   let saved = 0;
 
   for (let i = 0; i < files.length; i++) {
-    setStatus(`Extracting metadata (${i + 1}/${files.length})…`);
-    const meta = await extractMeta(files[i]); // EXIF from original before any conversion
+    setStatus(`Preparing ${i + 1} of ${files.length}…`);
+    const meta = await extractMeta(files[i]); // EXIF from original before conversion
+
+    // Convert HEIC → JPEG if needed — skip file if it can't be converted
+    let fileToUpload;
+    try {
+      fileToUpload = await toUploadableFile(files[i]);
+    } catch (err) {
+      setStatus(`Skipped: ${err.message}`);
+      continue; // skip this file, keep processing others
+    }
 
     setStatus(`Uploading ${i + 1} of ${files.length}…`);
     try {
-      // Convert HEIC → JPEG if needed, then derive extension for ImageKit
-      const fileToUpload = await toUploadableFile(files[i]);
       const rawExt  = fileToUpload.name.split(".").pop().toLowerCase();
-      const safeExt = /^(jpg|jpeg|png|gif|webp|heic|heif|avif)$/.test(rawExt) ? rawExt : "jpg";
+      const safeExt = /^(jpg|jpeg|png|gif|webp|avif)$/.test(rawExt) ? rawExt : "jpg";
       const ikName  = `${meta.id}.${safeExt}`;
 
       const ikForm = new FormData();
@@ -398,18 +405,41 @@ async function processFiles(files) {
   setStatus(`${saved} photo${saved === 1 ? "" : "s"} added. Tap any photo to edit details.`);
 }
 
-// Convert HEIC/HEIF → JPEG before upload (ImageKit free plan rejects HEIC input)
+// Convert HEIC/HEIF → JPEG before upload (ImageKit free plan rejects HEIC input).
+// Two methods: heic2any (Chrome/Firefox) then canvas (Safari renders HEIC natively).
+// Throws if both fail — caller shows a real error instead of uploading corrupt data.
 async function toUploadableFile(file) {
-  const isHeic = /\.(heic|heif)$/i.test(file.name) || file.type === "image/heic" || file.type === "image/heif";
+  const isHeic = /\.(heic|heif)$/i.test(file.name)
+              || file.type === "image/heic"
+              || file.type === "image/heif";
   if (!isHeic) return file;
-  try {
-    const blob = await window.heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
-    const result = Array.isArray(blob) ? blob[0] : blob;
-    return new File([result], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
-  } catch (err) {
-    console.warn("HEIC→JPEG conversion failed, uploading original:", err);
-    return file;
+
+  setStatus("Converting HEIC…");
+
+  // Method 1: heic2any (Chrome / Firefox — no native HEIC support)
+  if (window.heic2any) {
+    try {
+      const out  = await window.heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
+      const blob = Array.isArray(out) ? out[0] : out;
+      if (blob && blob.size > 0) {
+        return new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
+      }
+    } catch (_) { /* fall through to method 2 */ }
   }
+
+  // Method 2: canvas (Safari renders HEIC natively via createImageBitmap)
+  try {
+    const bitmap = await createImageBitmap(file);
+    const canvas = Object.assign(document.createElement("canvas"),
+      { width: bitmap.width, height: bitmap.height });
+    canvas.getContext("2d").drawImage(bitmap, 0, 0);
+    const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.92));
+    if (blob && blob.size > 0) {
+      return new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
+    }
+  } catch (_) { /* fall through to error */ }
+
+  throw new Error("Cannot convert HEIC — please export as JPEG from Photos and re-upload.");
 }
 
 // Extract all EXIF/GPS/IPTC from a file without opening any modal.
