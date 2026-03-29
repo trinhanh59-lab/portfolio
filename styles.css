@@ -854,6 +854,9 @@ button, input, textarea, select { font: inherit; }
 footer {
   padding: 22px var(--pad);
   border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 footer p {
@@ -862,6 +865,24 @@ footer p {
   letter-spacing: 0.14em;
   color: var(--muted2);
 }
+
+.owner-icon-btn {
+  background: none;
+  border: none;
+  padding: 6px;
+  cursor: pointer;
+  color: var(--muted2);
+  opacity: 0.4;
+  transition: opacity 0.2s, color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+.owner-icon-btn:hover { opacity: 1; color: var(--accent); }
+
+/* Hide the old nav owner button if it exists */
+.nav-owner-btn { display: none; }
 
 /* ─── Owner bar ───────────────────────────────────────────────────────────── */
 .owner-bar {
