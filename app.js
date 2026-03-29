@@ -405,41 +405,47 @@ async function processFiles(files) {
   setStatus(`${saved} photo${saved === 1 ? "" : "s"} added. Tap any photo to edit details.`);
 }
 
-// Convert HEIC/HEIF → JPEG before upload (ImageKit free plan rejects HEIC input).
-// Two methods: heic2any (Chrome/Firefox) then canvas (Safari renders HEIC natively).
-// Throws if both fail — caller shows a real error instead of uploading corrupt data.
+// Convert HEIC/HEIF → JPEG before upload (ImageKit free plan rejects HEIC).
+// Canvas first (instant on Safari which renders HEIC natively), then heic2any
+// with a hard timeout as fallback for Chrome/Firefox.
 async function toUploadableFile(file) {
   const isHeic = /\.(heic|heif)$/i.test(file.name)
               || file.type === "image/heic"
               || file.type === "image/heif";
   if (!isHeic) return file;
 
-  setStatus("Converting HEIC…");
+  setStatus("Converting image…");
+  const newName = (file.name.replace(/\.(heic|heif)$/i, "") || "photo") + ".jpg";
 
-  // Method 1: heic2any (Chrome / Firefox — no native HEIC support)
-  if (window.heic2any) {
-    try {
-      const out  = await window.heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
-      const blob = Array.isArray(out) ? out[0] : out;
-      if (blob && blob.size > 0) {
-        return new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
-      }
-    } catch (_) { /* fall through to method 2 */ }
-  }
-
-  // Method 2: canvas (Safari renders HEIC natively via createImageBitmap)
+  // Method 1: canvas via createImageBitmap — instant on Safari (native HEIC support)
   try {
     const bitmap = await createImageBitmap(file);
     const canvas = Object.assign(document.createElement("canvas"),
       { width: bitmap.width, height: bitmap.height });
     canvas.getContext("2d").drawImage(bitmap, 0, 0);
-    const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.92));
-    if (blob && blob.size > 0) {
-      return new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
+    const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.88));
+    if (blob && blob.size > 1000) {
+      return new File([blob], newName, { type: "image/jpeg" });
     }
-  } catch (_) { /* fall through to error */ }
+  } catch (_) { /* not supported in this browser — try heic2any */ }
 
-  throw new Error("Cannot convert HEIC — please export as JPEG from Photos and re-upload.");
+  // Method 2: heic2any with 25s timeout (Chrome/Firefox have no native HEIC support)
+  if (window.heic2any) {
+    try {
+      const timeout = new Promise((_, rej) =>
+        setTimeout(() => rej(new Error("heic2any timed out")), 25000));
+      const out  = await Promise.race([
+        window.heic2any({ blob: file, toType: "image/jpeg", quality: 0.88 }),
+        timeout
+      ]);
+      const blob = Array.isArray(out) ? out[0] : out;
+      if (blob && blob.size > 1000) {
+        return new File([blob], newName, { type: "image/jpeg" });
+      }
+    } catch (_) { /* timed out or failed */ }
+  }
+
+  throw new Error("HEIC conversion failed. In the iPhone Photos app, share the photo → select JPEG, then re-upload.");
 }
 
 // Extract all EXIF/GPS/IPTC from a file without opening any modal.
