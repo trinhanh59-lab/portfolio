@@ -12,11 +12,11 @@ const SITE = {
 
 const OWNER_PASSWORD = "change-this-password"; // ← change before publishing
 
-// ─── Cloudinary ───────────────────────────────────────────────────────────────
-const CLOUDINARY_CLOUD    = "ddhxv23at";
-const CLOUDINARY_PRESET   = "ml_default";
-const CLOUDINARY_UPLOAD   = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`;
-const CLOUDINARY_BASE_URL = `https://res.cloudinary.com/${CLOUDINARY_CLOUD}/image/upload`;
+// ─── ImageKit ─────────────────────────────────────────────────────────────────
+const IMAGEKIT_ID          = "sphopalr1";
+const IMAGEKIT_PRIVATE_KEY = "private_KIgASXqBKJ+ttIq8bXAjpNbcWxI=";
+const IMAGEKIT_UPLOAD_URL  = "https://upload.imagekit.io/api/v1/files/upload";
+const IMAGEKIT_BASE_URL    = `https://ik.imagekit.io/${IMAGEKIT_ID}`;
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 // Required SQL (run once in Supabase SQL editor):
@@ -376,14 +376,20 @@ async function processFiles(files) {
 
     setStatus(`Uploading ${i + 1} of ${files.length}…`);
     try {
-      const cldForm = new FormData();
-      cldForm.append("file",           files[i]);
-      cldForm.append("upload_preset",  CLOUDINARY_PRESET);
-      cldForm.append("public_id",      meta.id);
-      const res  = await fetch(CLOUDINARY_UPLOAD, { method: "POST", body: cldForm });
+      const ikForm = new FormData();
+      ikForm.append("file",              files[i]);
+      ikForm.append("fileName",          meta.id);
+      ikForm.append("useUniqueFileName", "false");
+      ikForm.append("folder",            "/portfolio");
+      const auth = btoa(IMAGEKIT_PRIVATE_KEY + ":");
+      const res  = await fetch(IMAGEKIT_UPLOAD_URL, {
+        method: "POST",
+        headers: { "Authorization": `Basic ${auth}` },
+        body: ikForm
+      });
       const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
-      meta.cloudinaryId = data.public_id;
+      if (!res.ok) throw new Error(data.message || "Upload failed");
+      meta.cloudinaryId = data.filePath;
     } catch (err) {
       setStatus(`Upload failed: ${err.message}`);
       setProgress(100);
@@ -882,7 +888,8 @@ async function toggleStar(id) {
 function downloadPhoto(id) {
   const p = state.photos.find(x => x.id === id);
   if (!p?.cloudinaryId) return;
-  const url = cloudinaryUrl(p.cloudinaryId, "fl_attachment,q_auto");
+  const path = p.cloudinaryId?.startsWith("/") ? p.cloudinaryId : `/${p.cloudinaryId}`;
+  const url  = `${IMAGEKIT_BASE_URL}${path}?ik-attachment=true`;
   const a   = Object.assign(document.createElement("a"), {
     href: url, download: (p.title || "photo") + ".jpg", target: "_blank"
   });
@@ -1130,10 +1137,22 @@ function fmtShutter(v)   { if (v == null || v === "") return ""; const n = Numbe
 function fmtFocal(v)     { if (v == null || v === "") return ""; const n = Number(v); if (!isFinite(n)) return str(v); return `${n % 1 === 0 ? n.toFixed(0) : n.toFixed(1).replace(/\.0$/, "")}mm`; }
 function titleize(name)  { const s = name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim(); return s ? s.replace(/\b\w/g, m => m.toUpperCase()) : "Untitled"; }
 
-// ─── Cloudinary URL helper ────────────────────────────────────────────────────
-function cloudinaryUrl(publicId, transforms) {
-  if (!publicId) return "";
-  return `${CLOUDINARY_BASE_URL}/${transforms}/${publicId}`;
+// ─── ImageKit URL helper ──────────────────────────────────────────────────────
+// Converts Cloudinary-style transforms (w_600,q_auto) to ImageKit (w-600,q-auto)
+function cloudinaryUrl(filePath, transforms) {
+  if (!filePath) return "";
+  const path = filePath.startsWith("/") ? filePath : `/${filePath}`;
+  if (!transforms) return `${IMAGEKIT_BASE_URL}${path}`;
+  // Map Cloudinary transform syntax → ImageKit syntax
+  const ikTransforms = transforms
+    .replace(/fl_attachment[^,]*/g, "") // handled separately via ik-attachment
+    .replace(/c_fill/g, "cm-pad_resize")
+    .replace(/(\w+)_/g, "$1-")          // w_600 → w-600, q_auto → q-auto, etc.
+    .replace(/^,|,$/g, "")             // trim leading/trailing commas
+    .replace(/,,+/g, ",");             // collapse double commas
+  return ikTransforms
+    ? `${IMAGEKIT_BASE_URL}/tr:${ikTransforms}${path}`
+    : `${IMAGEKIT_BASE_URL}${path}`;
 }
 
 // ─── Supabase: photos ─────────────────────────────────────────────────────────
