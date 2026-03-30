@@ -460,7 +460,6 @@ function syncOwnerUI() {
   document.getElementById("newAlbumBtn").classList.toggle("hidden", !state.ownerMode);
 
   const ownerBtn = document.getElementById("ownerBtn");
-  ownerBtn.classList.toggle("hidden", !state.ownerMode);
   ownerBtn.title = state.ownerMode ? "Sign out" : "Owner access";
   ownerBtn.setAttribute("aria-label", state.ownerMode ? "Sign out" : "Owner access");
 
