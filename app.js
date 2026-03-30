@@ -196,12 +196,6 @@ function bindEvents() {
     if (files.length) processFiles(files);
   });
 
-  document.getElementById("cameraInput").addEventListener("change", e => {
-    const files = Array.from(e.target.files || []).filter(isImageFile);
-    e.target.value = "";
-    if (files.length) processFiles(files);
-  });
-
   document.getElementById("heroUploadBtn").addEventListener("click", () => {
     document.getElementById("uploadInput").click();
   });
