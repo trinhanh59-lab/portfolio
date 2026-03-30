@@ -843,16 +843,10 @@ function renderReview() {
     : "Nothing is published until you save.";
 
   document.getElementById("reviewList").innerHTML = state.reviewQueue.map(draft => {
-    const missing = getMissing(draft);
-    const badge = missing.length
-      ? `<span class="meta-badge warn">Missing: ${esc(missing.join(", "))}</span>`
-      : `<span class="meta-badge ok">Metadata complete</span>`;
-
     return `
       <div class="review-item">
         <div class="review-preview"><img src="${escA(draft.previewUrl)}" alt="Preview of ${escA(draft.title || "photograph")}" /></div>
         <form class="review-form" data-draft-id="${escA(draft.draftId)}">
-          ${badge}
           <div class="f-row">
             <div class="field"><label>Title</label><input name="title" type="text" value="${escA(draft.title)}" placeholder="Untitled" /></div>
             <div class="field"><label>Collection</label><input name="series" type="text" value="${escA(draft.series)}" placeholder="e.g. Quiet Coast" /></div>
@@ -1656,15 +1650,7 @@ async function ensureAlbumExists(name, fallbackCover = "") {
   await sbAlbumUpsert(album);
 }
 
-function getMissing(draft) {
-  const missing = [];
-  if (!draft.dateTaken) missing.push("date");
-  if (!draft.location) missing.push("location");
-  if (!draft.camera) missing.push("camera");
-  if (!draft.aperture) missing.push("aperture");
-  if (!draft.shutterSpeed) missing.push("shutter");
-  return missing;
-}
+
 
 function photoTimestamp(photo) {
   const source = photo.dateTaken || photo.uploadedAt;
