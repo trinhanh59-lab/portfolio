@@ -559,8 +559,9 @@ async function ensureOwnerLibraries() {
 }
 
 function isImageFile(file) {
-  if (RAW_EXTENSIONS.test(file.name)) return false;
-  return file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name);
+  const name = String(file.name || "");
+  if (RAW_EXTENSIONS.test(name)) return false;
+  return (file.type && file.type.startsWith("image/")) || /\.(heic|heif|png|jpg|jpeg|webp)$/i.test(name) || !name;
 }
 
 async function processFiles(files) {
@@ -1756,7 +1757,8 @@ function fmtFocal(value) {
 }
 
 function titleize(name) {
-  const source = name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!name) return "Untitled";
+  const source = String(name).replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
   return source ? source.replace(/\b\w/g, match => match.toUpperCase()) : "Untitled";
 }
 
