@@ -566,7 +566,11 @@ function isImageFile(file) {
 
 async function processFiles(files) {
   files = Array.from(files).filter(isImageFile);
-  if (!state.ownerMode || state.uploading || !files.length) return;
+  if (!state.ownerMode || !files.length) return;
+  if (state.uploading) {
+    setStatus("Still processing the previous batch. Try again in a moment.");
+    return;
+  }
 
   state.uploading = true;
   const unlockTimer = setTimeout(() => {
@@ -723,7 +727,12 @@ async function compressImage(blob) {
 }
 
 function canvasToBlob(canvas, type, quality) {
-  return new Promise(resolve => canvas.toBlob(resolve, type, quality));
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(new Error("Could not encode image. Try a different file."));
+    }, type, quality);
+  });
 }
 
 async function extractMeta(file) {
@@ -1008,16 +1017,25 @@ function renderHero() {
   if (cover) {
     el.src = cloudinaryUrl(cover.cloudinaryId, "w_1600,q_80,f_auto");
     el.alt = cover.title ? `Featured photograph: ${cover.title}` : "Featured photograph";
+    el.classList.remove("hidden");
     updateSocialImage(cloudinaryUrl(cover.cloudinaryId, "w_1200,q_80,f_auto"));
   } else {
-    el.src = "";
+    el.removeAttribute("src");
     el.alt = "Featured photograph";
-    updateSocialImage("");
+    el.classList.add("hidden");
+    updateSocialImage(defaultSocialImageUrl());
   }
 }
 
 async function refresh() {
-  [state.photos, state.albums] = await Promise.all([sbGetAll(), sbAlbumsGetAll()]);
+  try {
+    [state.photos, state.albums] = await Promise.all([sbGetAll(), sbAlbumsGetAll()]);
+  } catch (err) {
+    console.error("Could not load portfolio data", err);
+    state.photos = state.photos || [];
+    state.albums = state.albums || [];
+    setStatus("Could not load portfolio. Check your connection and refresh.");
+  }
   sortPhotos();
   state.albumGroups = buildAlbumGroups(state.photos, state.albums);
 
@@ -1380,9 +1398,16 @@ function renderDetail(photo) {
   document.getElementById("detailTitle").textContent = photo.title || "Untitled";
   document.getElementById("detailDesc").textContent = photo.description || "No description added.";
 
+  const detailSrc = cloudinaryUrl(photo.cloudinaryId, "w_2000,q_auto,f_auto");
   image.style.opacity = "0";
   image.onload = () => { image.style.opacity = "1"; };
-  image.src = cloudinaryUrl(photo.cloudinaryId, "w_2000,q_auto,f_auto");
+  image.onerror = () => { image.style.opacity = "1"; };
+  if (detailSrc) {
+    image.src = detailSrc;
+  } else {
+    image.removeAttribute("src");
+    image.style.opacity = "1";
+  }
 
   const tags = [
     photo.starred && `<span class="tag featured-tag">Featured</span>`,
