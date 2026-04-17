@@ -22,6 +22,35 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,300;0,400;1,300;1,400&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Person",
+        "@id": "#anh-trinh",
+        "name": "Anh Trinh",
+        "jobTitle": "Photographer",
+        "url": "/",
+        "email": "mailto:Trinhanh59@gmail.com",
+        "address": {
+          "@type": "PostalAddress",
+          "addressRegion": "California",
+          "addressCountry": "US",
+          "addressLocality": "San Francisco Bay Area"
+        }
+      },
+      {
+        "@type": "WebSite",
+        "name": "Anh Trinh | Photography",
+        "url": "/",
+        "description": "Photography portfolio by Anh Trinh, featuring quiet, place-driven work from the San Francisco Bay Area and beyond.",
+        "author": { "@id": "#anh-trinh" },
+        "inLanguage": "en"
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Skip to content</a>
@@ -346,6 +375,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js" defer></script>
 </body>
 </html>

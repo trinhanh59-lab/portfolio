@@ -54,7 +54,8 @@ const state = {
   editingAlbum:    null,
   uploading:       false,
   secretTapCount:  0,
-  secretTapTimer:  null
+  secretTapTimer:  null,
+  loadError:       false
 };
 
 let ownerLibrariesPromise = null;
@@ -1030,10 +1031,12 @@ function renderHero() {
 async function refresh() {
   try {
     [state.photos, state.albums] = await Promise.all([sbGetAll(), sbAlbumsGetAll()]);
+    state.loadError = false;
   } catch (err) {
     console.error("Could not load portfolio data", err);
     state.photos = state.photos || [];
     state.albums = state.albums || [];
+    state.loadError = true;
     setStatus("Could not load portfolio. Check your connection and refresh.");
   }
   sortPhotos();
@@ -1152,7 +1155,11 @@ function renderSeries() {
 
   if (!groups.length) {
     wrap.className = "stagger";
-    wrap.innerHTML = `<div class="empty-placeholder">Collections appear as the archive grows${state.ownerMode ? ', or create one above.' : '.'}</div>`;
+    if (state.loadError) {
+      wrap.innerHTML = `<div class="empty-placeholder">Collections are temporarily unavailable. Please refresh in a moment.</div>`;
+    } else {
+      wrap.innerHTML = `<div class="empty-placeholder">Collections appear as the archive grows${state.ownerMode ? ', or create one above.' : '.'}</div>`;
+    }
     return;
   }
 
@@ -1312,6 +1319,17 @@ function renderGallery() {
   if (!photos.length) {
     const noPhotos = state.photos.length === 0;
     const viewingCollection = state.activeAlbum !== "all" && state.activeAlbum !== "starred";
+
+    if (noPhotos && state.loadError) {
+      wrap.innerHTML = `
+        <div class="empty">
+          <h3>Photographs are temporarily unavailable.</h3>
+          <p>The archive could not be reached. Please refresh the page in a moment, or check back shortly.</p>
+          <div class="empty-actions"><button type="button" class="btn-quiet" onclick="location.reload()">Reload</button></div>
+        </div>`;
+      return;
+    }
+
     const title = noPhotos
       ? "Selected work is on the way."
       : viewingCollection
@@ -1858,8 +1876,9 @@ function fromRow(row) {
 async function sbGetAll() {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}?select=*&order=order_timestamp.desc`, { headers: SB_HDR });
   if (!res.ok) {
-    console.error("Supabase fetch failed", await res.text());
-    return [];
+    const message = await res.text();
+    console.error("Supabase fetch failed", message);
+    throw new Error(`Photos load failed (HTTP ${res.status})`);
   }
   return (await res.json()).map(fromRow);
 }
@@ -1924,8 +1943,9 @@ function toAlbumRow(album) {
 async function sbAlbumsGetAll() {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_ALBUMS_TABLE}?select=*&order=sort_order.asc,name.asc`, { headers: SB_HDR });
   if (!res.ok) {
-    console.error("Albums fetch failed", await res.text());
-    return [];
+    const message = await res.text();
+    console.error("Albums fetch failed", message);
+    throw new Error(`Albums load failed (HTTP ${res.status})`);
   }
   return (await res.json()).map(fromAlbumRow);
 }
