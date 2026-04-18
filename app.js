@@ -1573,7 +1573,32 @@ async function refresh() {
   renderFilters();
   renderProjectIntro();
   renderGallery();
+  renderFilmstrip();
   initScrollReveal();
+}
+
+function renderFilmstrip() {
+  const section = document.getElementById("filmstripSection");
+  const strip = document.getElementById("filmstrip");
+  if (!section || !strip) return;
+
+  const recent = [...state.photos]
+    .filter(p => p.cloudinaryId)
+    .sort((a, b) => (b.orderTimestamp || 0) - (a.orderTimestamp || 0))
+    .slice(0, 10);
+
+  if (recent.length < 3) {
+    section.hidden = true;
+    strip.innerHTML = "";
+    return;
+  }
+
+  section.hidden = false;
+  strip.innerHTML = recent.map(photo => `
+    <button type="button" class="filmstrip-tile" data-photo-id="${escA(photo.id)}" aria-label="Open ${escA(photo.title || "photograph")}">
+      <img src="${escA(cloudinaryUrl(photo.cloudinaryId, "w_440,q_auto,f_auto"))}" alt="${escA(photo.title || "Photograph")}" loading="lazy" decoding="async" />
+      <div class="filmstrip-tile-title">${esc(photo.title || "Untitled")}</div>
+    </button>`).join("");
 }
 
 function sortPhotos() {
