@@ -213,21 +213,44 @@ function setAttr(id, attr, value) {
   if (el) el.setAttribute(attr, value);
 }
 
-function initScrollReveal() {
-  if (scrollRevealObserver) {
-    scrollRevealObserver.disconnect();
-  }
+// Apple-style scroll reveal: single persistent IntersectionObserver,
+// created once, survives across re-renders. observeRevealables(root)
+// attaches previously-unseen elements within a subtree. Elements are
+// unobserved as soon as they reveal, so the observer's work shrinks
+// monotonically — even a thousand photo bricks will only cost work
+// once each, regardless of how fast the user scrolls past them.
+const revealSeen = new WeakSet();
+
+function ensureScrollRevealObserver() {
+  if (scrollRevealObserver) return scrollRevealObserver;
   scrollRevealObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (!entry.isIntersecting) return;
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
       entry.target.classList.add("visible");
       scrollRevealObserver.unobserve(entry.target);
-    });
-  }, { threshold: 0.08, rootMargin: "0px 0px -40px 0px" });
-
-  document.querySelectorAll(".reveal, .reveal-fast, .stagger").forEach(el => {
-    if (!el.classList.contains("visible")) scrollRevealObserver.observe(el);
+    }
+  }, {
+    // Trigger a touch before the element fully enters the viewport —
+    // matches Apple's "reveal on approach" feel.
+    threshold: 0.05,
+    rootMargin: "0px 0px -10% 0px"
   });
+  return scrollRevealObserver;
+}
+
+function observeRevealables(root = document) {
+  const observer = ensureScrollRevealObserver();
+  const nodes = (root.querySelectorAll ? root : document).querySelectorAll(".reveal, .reveal-fast, .stagger");
+  for (const el of nodes) {
+    if (revealSeen.has(el)) continue;
+    if (el.classList.contains("visible")) continue;
+    revealSeen.add(el);
+    observer.observe(el);
+  }
+}
+
+function initScrollReveal() {
+  observeRevealables(document);
 }
 
 // Unified scroll controller: one scroll listener, RAF-batched, no
@@ -235,7 +258,6 @@ function initScrollReveal() {
 // recomputed on resize). Handles nav .scrolled toggle, scroll-hint
 // dismiss, and the hero body lift/fade together.
 let scrollControllerBound = false;
-let cachedHeroHeight = 0;
 
 function initNavScroll() {
   bindUnifiedScroll();
@@ -246,24 +268,15 @@ function bindUnifiedScroll() {
   scrollControllerBound = true;
 
   const nav = document.getElementById("mainNav");
-  const body = document.querySelector(".hero-left-body");
-  const hero = document.querySelector(".hero");
-
-  const recomputeHeroHeight = () => {
-    cachedHeroHeight = hero ? hero.getBoundingClientRect().height : 0;
-  };
-  recomputeHeroHeight();
-  window.addEventListener("resize", recomputeHeroHeight, { passive: true });
 
   let rafId = 0;
   let navScrolledState = null;
-  const reducedMotion = prefersReducedMotion();
 
   const update = () => {
     rafId = 0;
     const y = window.scrollY;
 
-    // Nav .scrolled toggle — only write when state changes
+    // Nav .scrolled toggle — only write to DOM when the boolean flips
     const isScrolled = y > 40;
     if (nav && isScrolled !== navScrolledState) {
       nav.classList.toggle("scrolled", isScrolled);
@@ -272,13 +285,6 @@ function bindUnifiedScroll() {
 
     // Dismiss scroll hint once
     if (y > 50) dismissScrollHint();
-
-    // Hero body lift + fade (skip entirely under reduced motion)
-    if (!reducedMotion && body && cachedHeroHeight > 0 && y <= cachedHeroHeight) {
-      const progress = Math.min(y / Math.max(cachedHeroHeight * 0.6, 1), 1);
-      body.style.transform = `translate3d(0, ${(-progress * 24).toFixed(2)}px, 0)`;
-      body.style.opacity = String(1 - progress * 0.45);
-    }
   };
 
   window.addEventListener("scroll", () => {
@@ -1984,7 +1990,7 @@ function renderGallery() {
       </button>`;
   }).join("")}</div>`;
 
-  initScrollReveal();
+  observeRevealables(wrap);
 }
 
 function emptyActions(noPhotos) {

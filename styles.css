@@ -32,6 +32,9 @@ body.time-midday  { --ambient-warm: 0.00; }
 body.time-dusk    { --ambient-warm: 0.08; }
 body.time-night   { --ambient-warm: 0.05; }
 
+/* Ambient warmth tint. Promoted to its own compositor layer via
+   transform: translateZ(0) so scroll doesn't force a re-blend of the
+   whole document — the tint is painted once, reused every frame. */
 body::before {
   content: "";
   position: fixed;
@@ -41,7 +44,9 @@ body::before {
   z-index: 1;
   mix-blend-mode: multiply;
   transition: background 2s ease;
+  transform: translateZ(0);
 }
+body { isolation: isolate; }
 
 /* First-visit intro overlay: dark canvas with one word, fades out. */
 .intro-overlay {
@@ -147,30 +152,49 @@ button { background: none; }
   outline-offset: 3px;
 }
 
+/* Apple-style scroll reveal:
+   - slightly longer duration (1s) so motion feels deliberate, not snappy
+   - larger translateY so the lift is visible but not dramatic
+   - Apple's signature cubic-bezier (quick out, soft finish)
+   - translate3d pins elements to their own compositor layer so transitions
+     don't cause surrounding content to repaint
+*/
 .reveal {
   opacity: 0;
-  transform: translateY(20px);
-  transition: opacity 0.85s var(--ease), transform 0.85s var(--ease);
+  transform: translate3d(0, 40px, 0);
+  transition: opacity 1s cubic-bezier(0.32, 0.72, 0, 1),
+              transform 1s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.reveal.visible { opacity: 1; transform: translateY(0); }
+.reveal.visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
 
 .stagger > * {
   opacity: 0;
-  transform: translateY(14px);
-  transition: opacity 0.7s var(--ease), transform 0.7s var(--ease);
+  transform: translate3d(0, 32px, 0);
+  transition: opacity 0.9s cubic-bezier(0.32, 0.72, 0, 1),
+              transform 0.9s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.stagger.visible > *:nth-child(1) { transition-delay: 0s;    opacity:1; transform:none; }
-.stagger.visible > *:nth-child(2) { transition-delay: 0.09s; opacity:1; transform:none; }
-.stagger.visible > *:nth-child(3) { transition-delay: 0.18s; opacity:1; transform:none; }
-.stagger.visible > *:nth-child(4) { transition-delay: 0.27s; opacity:1; transform:none; }
-.stagger.visible > *:nth-child(5) { transition-delay: 0.36s; opacity:1; transform:none; }
-.stagger.visible > *:nth-child(n+6) { transition-delay: 0.44s; opacity:1; transform:none; }
+.stagger.visible > *:nth-child(1) { transition-delay: 0s;    opacity:1; transform: translate3d(0, 0, 0); }
+.stagger.visible > *:nth-child(2) { transition-delay: 0.08s; opacity:1; transform: translate3d(0, 0, 0); }
+.stagger.visible > *:nth-child(3) { transition-delay: 0.16s; opacity:1; transform: translate3d(0, 0, 0); }
+.stagger.visible > *:nth-child(4) { transition-delay: 0.24s; opacity:1; transform: translate3d(0, 0, 0); }
+.stagger.visible > *:nth-child(5) { transition-delay: 0.32s; opacity:1; transform: translate3d(0, 0, 0); }
+.stagger.visible > *:nth-child(n+6) { transition-delay: 0.4s; opacity:1; transform: translate3d(0, 0, 0); }
 
+/* Photo bricks: slightly shorter, but same curve so they feel part of the
+   same family. */
 .reveal-fast {
   opacity: 0;
-  transition: opacity 0.5s ease;
+  transform: translate3d(0, 24px, 0);
+  transition: opacity 0.75s cubic-bezier(0.32, 0.72, 0, 1),
+              transform 0.75s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.reveal-fast.visible { opacity: 1; }
+.reveal-fast.visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
 
 .nav {
   position: fixed;
