@@ -1741,6 +1741,22 @@ footer p {
   color: var(--muted2);
 }
 
+.detail-title.editable {
+  cursor: text;
+  transition: background 0.2s ease, outline-offset 0.2s ease;
+  border-radius: 3px;
+  padding: 2px 6px;
+  margin: -2px -6px;
+}
+.detail-title.editable:hover {
+  background: rgba(28,26,23,0.04);
+}
+.detail-title.editable[contenteditable="true"] {
+  outline: 1px solid var(--line2);
+  outline-offset: 2px;
+  background: var(--bg);
+}
+
 .detail-title {
   font-family: var(--serif);
   font-size: 1.6rem;

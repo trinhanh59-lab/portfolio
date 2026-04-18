@@ -368,7 +368,10 @@ function bindEvents() {
   const secretTrigger = document.getElementById("footerSecretTrigger");
   if (secretTrigger) secretTrigger.addEventListener("click", registerSecretTap);
 
-  window.addEventListener("hashchange", handleOwnerHash);
+  window.addEventListener("hashchange", () => {
+    handleOwnerHash();
+    handlePhotoHash();
+  });
 
   document.addEventListener("click", e => {
     const closer = e.target.closest("[data-close]");
@@ -419,6 +422,7 @@ function bindEvents() {
       if (type === "star") toggleStar(photoId);
       if (type === "set-cover") setAlbumCover(photoId);
       if (type === "close") closeOverlay("detailOverlay");
+      if (type === "share") sharePhotoLink(photoId);
       return;
     }
 
@@ -1575,6 +1579,17 @@ async function refresh() {
   renderGallery();
   renderFilmstrip();
   initScrollReveal();
+  handlePhotoHash();
+}
+
+function handlePhotoHash() {
+  const match = /#photo=([^&]+)/.exec(window.location.hash);
+  if (!match) return;
+  const id = decodeURIComponent(match[1]);
+  if (state.activeId === id) return; // already open
+  const photo = state.photos.find(p => p.id === id);
+  if (!photo) return;
+  openDetail(id);
 }
 
 function renderFilmstrip() {
@@ -2015,13 +2030,76 @@ function renderDetail(photo) {
       <button class="btn-ghost btn-sm" data-action="edit" data-photo-id="${escA(photo.id)}">Edit</button>
       ${coverAction}
       <button class="btn-quiet btn-sm" data-action="download" data-photo-id="${escA(photo.id)}">Download</button>
+      <button class="btn-quiet btn-sm" data-action="share" data-photo-id="${escA(photo.id)}">Copy link</button>
       <button class="btn-danger-pill btn-sm" data-action="delete" data-photo-id="${escA(photo.id)}">Delete</button>
       <button class="btn-quiet btn-sm push-end" data-action="close">Close</button>`;
   } else {
     document.getElementById("detailActions").innerHTML = `
       <a class="btn" href="${escA(buildInquiryLink(photo))}">Inquire about this photograph</a>
+      <button class="btn-quiet btn-sm" data-action="share" data-photo-id="${escA(photo.id)}">Copy link</button>
       <button class="btn-quiet btn-sm push-end" data-action="close">Close</button>`;
   }
+
+  bindDetailTitleInlineEdit(photo);
+}
+
+function bindDetailTitleInlineEdit(photo) {
+  const titleEl = document.getElementById("detailTitle");
+  if (!titleEl) return;
+  // Reset any previous binding
+  titleEl.ondblclick = null;
+  titleEl.onblur = null;
+  titleEl.onkeydown = null;
+  titleEl.contentEditable = "false";
+  titleEl.classList.remove("editable");
+
+  if (!state.ownerMode) return;
+  titleEl.classList.add("editable");
+  titleEl.title = "Double-click to edit title";
+
+  titleEl.ondblclick = () => {
+    titleEl.contentEditable = "true";
+    titleEl.focus();
+    // Select all contents
+    const range = document.createRange();
+    range.selectNodeContents(titleEl);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  };
+
+  titleEl.onkeydown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      titleEl.blur();
+    } else if (e.key === "Escape") {
+      titleEl.textContent = photo.title || "Untitled";
+      titleEl.blur();
+    }
+  };
+
+  titleEl.onblur = async () => {
+    titleEl.contentEditable = "false";
+    const newTitle = titleEl.textContent.trim();
+    if (!newTitle || newTitle === (photo.title || "Untitled")) {
+      titleEl.textContent = photo.title || "Untitled";
+      return;
+    }
+    try {
+      const updated = { ...photo, title: newTitle };
+      await sbUpsert(updated);
+      photo.title = newTitle;
+      const stateMatch = state.photos.find(p => p.id === photo.id);
+      if (stateMatch) stateMatch.title = newTitle;
+      setStatus("Title updated.");
+      renderGallery();
+      renderHero();
+    } catch (err) {
+      console.error(err);
+      titleEl.textContent = photo.title || "Untitled";
+      setStatus(`Could not save title: ${err.message}`);
+    }
+  };
 }
 
 function navDetail(direction) {
@@ -2079,6 +2157,30 @@ async function setAlbumCover(id) {
   } catch (err) {
     console.error(err);
     setStatus(`Could not update collection cover: ${err.message}`);
+  }
+}
+
+async function sharePhotoLink(id) {
+  const photo = state.photos.find(p => p.id === id);
+  if (!photo) return;
+  const url = `${window.location.origin}${window.location.pathname}#photo=${encodeURIComponent(id)}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({
+        title: photo.title || "Photograph",
+        text: photo.title ? `"${photo.title}" by ${SITE.name}` : `A photograph by ${SITE.name}`,
+        url
+      });
+      return;
+    }
+  } catch (_) { /* user cancelled share or not supported — fall through to copy */ }
+
+  try {
+    await navigator.clipboard.writeText(url);
+    setStatus("Link copied.");
+  } catch (err) {
+    console.error(err);
+    setStatus(`Could not copy link: ${err.message}`);
   }
 }
 
