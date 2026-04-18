@@ -61,6 +61,12 @@ const state = {
 
 let ownerLibrariesPromise = null;
 let scrollRevealObserver = null;
+let heroRotateTimer = null;
+let heroCurrentlyTimer = null;
+let heroParallaxBound = false;
+let magneticEnterBound = false;
+let heroHoverPaused = false;
+let heroHoverBound = false;
 
 const OVERLAYS = ["loginOverlay", "reviewOverlay", "detailOverlay", "confirmOverlay", "albumOverlay"];
 const RAW_EXTENSIONS  = /\.(raf|cr2|cr3|nef|nrw|arw|srw|srf|orf|rw2|pef|dng|3fr|mef|mrw|rwl|x3f|iiq)$/i;
@@ -1063,8 +1069,10 @@ async function uploadPreparedFile(file, photoId) {
 }
 
 function renderHero() {
-  const cover = state.photos.find(photo => photo.starred && photo.cloudinaryId)
-    || state.photos.find(photo => photo.cloudinaryId);
+  const starred = state.photos.filter(photo => photo.starred && photo.cloudinaryId);
+  const anyWithCover = state.photos.filter(photo => photo.cloudinaryId);
+  const pool = starred.length ? starred : anyWithCover;
+  const cover = pool[0];
   const el = document.getElementById("heroCoverImg");
   if (!el) return;
 
@@ -1079,6 +1087,171 @@ function renderHero() {
     el.classList.add("hidden");
     updateSocialImage(defaultSocialImageUrl());
   }
+
+  startHeroPhotoRotation(pool);
+  bindHeroParallax();
+  bindMagneticEnter();
+  renderHeroCurrently();
+}
+
+function startHeroPhotoRotation(pool) {
+  if (heroRotateTimer) {
+    clearInterval(heroRotateTimer);
+    heroRotateTimer = null;
+  }
+  if (!pool || pool.length < 2) return;
+  if (prefersReducedMotion()) return;
+
+  const el = document.getElementById("heroCoverImg");
+  if (!el) return;
+
+  if (!heroHoverBound) {
+    const frame = el.parentElement;
+    if (frame) {
+      frame.addEventListener("mouseenter", () => { heroHoverPaused = true; });
+      frame.addEventListener("mouseleave", () => { heroHoverPaused = false; });
+      heroHoverBound = true;
+    }
+  }
+
+  let idx = 0;
+  heroRotateTimer = setInterval(() => {
+    if (heroHoverPaused || document.hidden) return;
+    idx = (idx + 1) % pool.length;
+    const next = pool[idx];
+    if (!next?.cloudinaryId) return;
+    const nextUrl = cloudinaryUrl(next.cloudinaryId, "w_1600,q_80,f_auto");
+
+    // Preload so there's no flash mid-fade.
+    const preload = new Image();
+    preload.onload = () => {
+      el.style.opacity = "0";
+      setTimeout(() => {
+        el.src = nextUrl;
+        el.alt = next.title ? `Featured photograph: ${next.title}` : "Featured photograph";
+        el.onload = () => { el.style.opacity = "1"; };
+        el.onerror = () => { el.style.opacity = "1"; };
+      }, 700);
+    };
+    preload.onerror = () => { /* skip this slide */ };
+    preload.src = nextUrl;
+  }, 9000);
+}
+
+function bindHeroParallax() {
+  if (heroParallaxBound) return;
+  if (prefersReducedMotion()) return;
+  if (window.matchMedia?.("(hover: none)").matches) return; // no mouse
+
+  const hero = document.querySelector(".hero");
+  const frame = document.querySelector(".hero-photo-frame");
+  if (!hero || !frame) return;
+  heroParallaxBound = true;
+
+  const maxShift = 8;
+  let rafId = 0;
+  let tx = 0, ty = 0;
+
+  hero.addEventListener("mousemove", (e) => {
+    const rect = hero.getBoundingClientRect();
+    const nx = (e.clientX - rect.left) / rect.width - 0.5;
+    const ny = (e.clientY - rect.top) / rect.height - 0.5;
+    tx = nx * -maxShift * 2;
+    ty = ny * -maxShift;
+    if (!rafId) {
+      rafId = requestAnimationFrame(() => {
+        frame.style.transform = `translate3d(${tx.toFixed(2)}px, ${ty.toFixed(2)}px, 0)`;
+        rafId = 0;
+      });
+    }
+  });
+
+  hero.addEventListener("mouseleave", () => {
+    frame.style.transform = "translate3d(0, 0, 0)";
+  });
+}
+
+function bindMagneticEnter() {
+  if (magneticEnterBound) return;
+  if (prefersReducedMotion()) return;
+  if (window.matchMedia?.("(hover: none)").matches) return;
+
+  const btn = document.querySelector(".hero-enter");
+  if (!btn) return;
+  magneticEnterBound = true;
+
+  const strength = 10;
+  let rafId = 0;
+
+  btn.addEventListener("mousemove", (e) => {
+    const rect = btn.getBoundingClientRect();
+    const nx = (e.clientX - rect.left) / rect.width - 0.5;
+    const ny = (e.clientY - rect.top) / rect.height - 0.5;
+    const dx = nx * strength;
+    const dy = ny * strength * 0.6;
+    if (!rafId) {
+      rafId = requestAnimationFrame(() => {
+        btn.style.transform = `translate3d(${dx.toFixed(2)}px, ${dy.toFixed(2)}px, 0)`;
+        rafId = 0;
+      });
+    }
+  });
+
+  btn.addEventListener("mouseleave", () => {
+    btn.style.transform = "translate3d(0, 0, 0)";
+  });
+}
+
+function renderHeroCurrently() {
+  const el = document.getElementById("heroCurrently");
+  if (!el) return;
+  if (heroCurrentlyTimer) {
+    clearInterval(heroCurrentlyTimer);
+    heroCurrentlyTimer = null;
+  }
+
+  const lines = buildHeroCurrentlyLines();
+  if (!lines.length) {
+    el.textContent = "";
+    return;
+  }
+
+  el.textContent = lines[0];
+  if (lines.length === 1 || prefersReducedMotion()) return;
+
+  let idx = 0;
+  heroCurrentlyTimer = setInterval(() => {
+    if (document.hidden) return;
+    idx = (idx + 1) % lines.length;
+    el.style.opacity = "0";
+    setTimeout(() => {
+      el.textContent = lines[idx];
+      el.style.opacity = "1";
+    }, 400);
+  }, 5500);
+}
+
+function buildHeroCurrentlyLines() {
+  const lines = [];
+  const sorted = [...state.photos].sort((a, b) => (b.orderTimestamp || 0) - (a.orderTimestamp || 0));
+  const latest = sorted[0];
+  if (latest?.title) {
+    const when = latest.dateTaken ? fmtMonthYear(latest.dateTaken) : "";
+    lines.push(`Most recent · ${latest.title}${when ? ` · ${when}` : ""}`);
+  }
+
+  const starredCount = state.photos.filter(photo => photo.starred).length;
+  if (starredCount > 0) {
+    lines.push(`Featured · ${starredCount} photograph${starredCount === 1 ? "" : "s"}`);
+  }
+
+  const locations = [...new Set(state.photos.map(photo => photo.location).filter(Boolean))];
+  if (locations.length >= 2) {
+    lines.push(`Working from · ${locations.slice(0, 3).join(" · ")}`);
+  }
+
+  lines.push(`Based in the ${SITE.location}`);
+  return lines;
 }
 
 async function refresh() {

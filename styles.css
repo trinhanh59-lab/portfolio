@@ -387,7 +387,8 @@ button { background: none; }
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--text);
-  transition: color 0.25s, gap 0.35s var(--ease);
+  transition: color 0.25s ease, gap 0.35s var(--ease), transform 0.35s var(--ease);
+  will-change: transform;
 }
 .hero-enter:hover { color: var(--accent); gap: 22px; }
 
@@ -407,6 +408,20 @@ button { background: none; }
   opacity: 0;
   animation: fadeIn 1s ease 0.9s forwards;
 }
+
+.hero-currently {
+  margin-top: 18px;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0;
+  animation: fadeIn 1s ease 1.3s forwards;
+  transition: opacity 0.4s ease;
+  min-height: 1em;
+}
+.hero-currently:empty::before { content: "\00a0"; }
 
 .hero-stat { display: flex; flex-direction: column; gap: 3px; }
 
@@ -436,6 +451,17 @@ button { background: none; }
   overflow: hidden;
 }
 
+.hero-photo-frame {
+  position: relative;
+  max-width: 100%;
+  max-height: calc(100svh - 128px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+
 .hero-photo {
   max-width: 100%;
   max-height: calc(100svh - 128px);
@@ -444,8 +470,10 @@ button { background: none; }
   object-fit: contain;
   display: block;
   opacity: 0;
-  animation: fadeIn 1.2s ease 0.6s forwards;
+  animation: fadeIn 1.4s var(--ease) 0.6s forwards;
   box-shadow: 0 8px 60px rgba(28,26,23,0.12);
+  transition: opacity 0.7s ease;
+  will-change: opacity;
 }
 .hero-photo:not([src]), .hero-photo[src=""] { display: none; }
 
