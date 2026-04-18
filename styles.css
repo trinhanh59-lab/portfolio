@@ -8,8 +8,8 @@ html { scroll-behavior: smooth; }
   --line:    rgba(28,26,23,0.08);
   --line2:   rgba(28,26,23,0.16);
   --text:    #1c1a17;
-  --muted:   rgba(28,26,23,0.50);
-  --muted2:  rgba(28,26,23,0.32);
+  --muted:   rgba(28,26,23,0.62);
+  --muted2:  rgba(28,26,23,0.48);
   --accent:  #c94040;
   --danger:  #c94040;
   --success: #3d7a5a;
@@ -1205,7 +1205,7 @@ footer p {
 }
 
 .close-btn {
-  width: 32px; height: 32px;
+  width: 44px; height: 44px;
   border-radius: 50%;
   border: 1px solid var(--line2);
   background: none;
@@ -1214,7 +1214,7 @@ footer p {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1rem;
+  font-size: 1.15rem;
   flex-shrink: 0;
   transition: border-color 0.2s, color 0.2s;
 }
@@ -1345,7 +1345,7 @@ footer p {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: 40px; height: 40px;
+  width: 44px; height: 44px;
   border-radius: 50%;
   border: 1px solid var(--line2);
   background: rgba(242,237,228,0.85);

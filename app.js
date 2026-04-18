@@ -51,6 +51,7 @@ const state = {
   reviewQueue:     [],
   reviewUrls:      [],
   pendingDeleteId: null,
+  pendingDeleteAlbum: null,
   editingAlbum:    null,
   uploading:       false,
   secretTapCount:  0,
@@ -59,6 +60,7 @@ const state = {
 };
 
 let ownerLibrariesPromise = null;
+let scrollRevealObserver = null;
 
 const OVERLAYS = ["loginOverlay", "reviewOverlay", "detailOverlay", "confirmOverlay", "albumOverlay"];
 const RAW_EXTENSIONS  = /\.(raf|cr2|cr3|nef|nrw|arw|srw|srf|orf|rw2|pef|dng|3fr|mef|mrw|rwl|x3f|iiq)$/i;
@@ -159,16 +161,19 @@ function setAttr(id, attr, value) {
 }
 
 function initScrollReveal() {
-  const io = new IntersectionObserver((entries) => {
+  if (scrollRevealObserver) {
+    scrollRevealObserver.disconnect();
+  }
+  scrollRevealObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (!entry.isIntersecting) return;
       entry.target.classList.add("visible");
-      io.unobserve(entry.target);
+      scrollRevealObserver.unobserve(entry.target);
     });
   }, { threshold: 0.08, rootMargin: "0px 0px -40px 0px" });
 
   document.querySelectorAll(".reveal, .reveal-fast, .stagger").forEach(el => {
-    if (!el.classList.contains("visible")) io.observe(el);
+    if (!el.classList.contains("visible")) scrollRevealObserver.observe(el);
   });
 }
 
@@ -209,8 +214,26 @@ function bindEvents() {
 
   document.getElementById("confirmDeleteBtn").addEventListener("click", async () => {
     const id = state.pendingDeleteId;
+    const albumName = state.pendingDeleteAlbum;
     state.pendingDeleteId = null;
+    state.pendingDeleteAlbum = null;
     closeOverlay("confirmOverlay");
+
+    if (albumName) {
+      try {
+        await sbAlbumDelete(albumName);
+        closeOverlay("albumOverlay");
+        state.editingAlbum = null;
+        await refresh();
+        setStatus("Collection deleted.");
+      } catch (err) {
+        console.error(err);
+        document.getElementById("albumErr").textContent = err.message || "Could not delete collection.";
+        openOverlay("albumOverlay");
+      }
+      return;
+    }
+
     if (!id) return;
     try {
       await sbDelete(id);
@@ -288,11 +311,8 @@ function bindEvents() {
     if (e.target.id === "mobileMenu") setMobileMenu(false);
   });
 
-  ["footerSecretTrigger", "navBrand"].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener("click", registerSecretTap);
-  });
+  const secretTrigger = document.getElementById("footerSecretTrigger");
+  if (secretTrigger) secretTrigger.addEventListener("click", registerSecretTap);
 
   window.addEventListener("hashchange", handleOwnerHash);
 
@@ -372,6 +392,8 @@ function bindEvents() {
       return;
     }
 
+    trapFocusInOpenOverlay(e);
+
     if (e.key === "Escape") {
       if (!document.getElementById("mobileMenu").hidden) {
         setMobileMenu(false);
@@ -438,6 +460,10 @@ function openOverlay(id) {
   if (!el) return;
   el.classList.add("open");
   document.body.classList.add("overlay-open");
+  const main = document.getElementById("mainContent");
+  if (main) main.setAttribute("aria-hidden", "true");
+  const nav = document.getElementById("mainNav");
+  if (nav) nav.setAttribute("aria-hidden", "true");
 }
 
 function closeOverlay(id) {
@@ -445,7 +471,34 @@ function closeOverlay(id) {
   if (!el) return;
   el.classList.remove("open");
   const anyOpen = OVERLAYS.some(name => document.getElementById(name).classList.contains("open"));
-  if (!anyOpen) document.body.classList.remove("overlay-open");
+  if (!anyOpen) {
+    document.body.classList.remove("overlay-open");
+    const main = document.getElementById("mainContent");
+    if (main) main.removeAttribute("aria-hidden");
+    const nav = document.getElementById("mainNav");
+    if (nav) nav.removeAttribute("aria-hidden");
+  }
+}
+
+function trapFocusInOpenOverlay(e) {
+  if (e.key !== "Tab") return;
+  const openId = OVERLAYS.find(name => document.getElementById(name)?.classList.contains("open"));
+  if (!openId) return;
+  const overlay = document.getElementById(openId);
+  const focusable = overlay.querySelectorAll(
+    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  );
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+  if (e.shiftKey && (active === first || !overlay.contains(active))) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && (active === last || !overlay.contains(active))) {
+    e.preventDefault();
+    first.focus();
+  }
 }
 
 function openOwnerAccess() {
@@ -1542,7 +1595,14 @@ async function setAlbumCover(id) {
 
 function downloadPhoto(id) {
   const photo = state.photos.find(item => item.id === id);
-  if (!photo?.cloudinaryId) return;
+  if (!photo) {
+    setStatus("Download failed: photo not found.");
+    return;
+  }
+  if (!photo.cloudinaryId) {
+    setStatus("Download unavailable: this photo has no file stored.");
+    return;
+  }
   const path = photo.cloudinaryId.startsWith("/") ? photo.cloudinaryId : `/${photo.cloudinaryId}`;
   const url = `${IMAGEKIT_BASE_URL}${path}?ik-attachment=true`;
   const link = Object.assign(document.createElement("a"), {
@@ -1581,6 +1641,8 @@ function confirmDelete(id) {
   const photo = state.photos.find(item => item.id === id);
   if (!photo || !state.ownerMode) return;
   state.pendingDeleteId = id;
+  state.pendingDeleteAlbum = null;
+  document.getElementById("confirmTitle").textContent = "Delete this photograph?";
   document.getElementById("confirmMsg").textContent = `Delete \"${photo.title || "Untitled"}\" permanently? This cannot be undone.`;
   openOverlay("confirmOverlay");
 }
@@ -1648,7 +1710,7 @@ async function saveAlbum(e) {
   }
 }
 
-async function deleteAlbum() {
+function deleteAlbum() {
   if (!state.editingAlbum) return;
   const name = state.editingAlbum;
   const hasPhotos = state.photos.some(photo => photo.series === name);
@@ -1657,16 +1719,12 @@ async function deleteAlbum() {
     return;
   }
 
-  try {
-    await sbAlbumDelete(name);
-    closeOverlay("albumOverlay");
-    state.editingAlbum = null;
-    await refresh();
-    setStatus("Collection deleted.");
-  } catch (err) {
-    console.error(err);
-    document.getElementById("albumErr").textContent = err.message || "Could not delete collection.";
-  }
+  state.pendingDeleteAlbum = name;
+  state.pendingDeleteId = null;
+  document.getElementById("confirmTitle").textContent = "Delete this collection?";
+  document.getElementById("confirmMsg").textContent = `Delete the collection "${name}"? This cannot be undone.`;
+  closeOverlay("albumOverlay");
+  openOverlay("confirmOverlay");
 }
 
 async function ensureAlbumExists(name, fallbackCover = "") {
