@@ -69,6 +69,9 @@ let heroHoverPaused = false;
 let heroHoverBound = false;
 let heroClickBound = false;
 let heroScrollBound = false;
+let heroKeyboardBound = false;
+let heroSwipeBound = false;
+let scrollHintDismissed = false;
 let statsCountedUp = false;
 let currentHeroPhoto = null;
 let heroPhotoPool = [];
@@ -1128,7 +1131,78 @@ function renderHero() {
   bindMagneticEnter();
   bindHeroClick();
   bindHeroScroll();
+  bindHeroKeyboard();
+  bindHeroSwipe();
   renderHeroCurrently();
+}
+
+function isHeroInView() {
+  const hero = document.querySelector(".hero");
+  if (!hero) return false;
+  const rect = hero.getBoundingClientRect();
+  return rect.bottom > 80 && rect.top < window.innerHeight * 0.5;
+}
+
+function isTextInput(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+}
+
+function bindHeroKeyboard() {
+  if (heroKeyboardBound) return;
+  heroKeyboardBound = true;
+  document.addEventListener("keydown", (e) => {
+    // Only when home-hero is in view, no overlay open, not typing.
+    if (isTextInput(e.target)) return;
+    if (OVERLAYS.some(id => document.getElementById(id)?.classList.contains("open"))) return;
+    if (!isHeroInView()) return;
+    if (heroPhotoPool.length < 2) return;
+
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setHeroSlide((heroPhotoIdx - 1 + heroPhotoPool.length) % heroPhotoPool.length);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setHeroSlide(heroPhotoIdx + 1);
+    }
+  });
+}
+
+function bindHeroSwipe() {
+  if (heroSwipeBound) return;
+  const frame = document.getElementById("heroPhotoFrame");
+  if (!frame) return;
+  heroSwipeBound = true;
+
+  let startX = 0, startY = 0, tracking = false;
+  frame.addEventListener("touchstart", (e) => {
+    if (heroPhotoPool.length < 2) return;
+    const t = e.touches[0];
+    startX = t.clientX;
+    startY = t.clientY;
+    tracking = true;
+  }, { passive: true });
+
+  frame.addEventListener("touchend", (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    if (Math.abs(dx) < 40) return;           // ignore taps
+    if (Math.abs(dy) > Math.abs(dx)) return; // mostly vertical = scroll
+    if (dx < 0) setHeroSlide(heroPhotoIdx + 1);
+    else setHeroSlide((heroPhotoIdx - 1 + heroPhotoPool.length) % heroPhotoPool.length);
+  }, { passive: true });
+}
+
+function dismissScrollHint() {
+  if (scrollHintDismissed) return;
+  const el = document.getElementById("scrollHint");
+  if (!el) return;
+  el.classList.add("dismissed");
+  scrollHintDismissed = true;
 }
 
 function renderHeroDots() {
@@ -1217,18 +1291,18 @@ function bindHeroClick() {
 
 function bindHeroScroll() {
   if (heroScrollBound) return;
-  if (prefersReducedMotion()) return;
 
   const body = document.querySelector(".hero-left-body");
-  if (!body) return;
   heroScrollBound = true;
 
   const onScroll = () => {
     const y = window.scrollY;
+    if (y > 50) dismissScrollHint();
+    if (prefersReducedMotion()) return;
     const hero = document.querySelector(".hero");
-    if (!hero) return;
+    if (!hero || !body) return;
     const maxShift = hero.getBoundingClientRect().height;
-    if (y > maxShift) return; // past hero, no work needed
+    if (y > maxShift) return;
     const progress = Math.min(y / Math.max(maxShift * 0.6, 1), 1);
     body.style.transform = `translateY(${(-progress * 24).toFixed(2)}px)`;
     body.style.opacity = String(1 - progress * 0.45);
