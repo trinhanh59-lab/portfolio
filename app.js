@@ -68,7 +68,6 @@ let magneticEnterBound = false;
 let heroHoverPaused = false;
 let heroHoverBound = false;
 let heroClickBound = false;
-let heroScrollBound = false;
 let heroKeyboardBound = false;
 let heroSwipeBound = false;
 let scrollHintDismissed = false;
@@ -231,11 +230,62 @@ function initScrollReveal() {
   });
 }
 
+// Unified scroll controller: one scroll listener, RAF-batched, no
+// layout-forcing reads per tick (the hero height is cached and only
+// recomputed on resize). Handles nav .scrolled toggle, scroll-hint
+// dismiss, and the hero body lift/fade together.
+let scrollControllerBound = false;
+let cachedHeroHeight = 0;
+
 function initNavScroll() {
+  bindUnifiedScroll();
+}
+
+function bindUnifiedScroll() {
+  if (scrollControllerBound) return;
+  scrollControllerBound = true;
+
   const nav = document.getElementById("mainNav");
-  const onScroll = () => nav.classList.toggle("scrolled", window.scrollY > 40);
-  onScroll();
-  window.addEventListener("scroll", onScroll, { passive: true });
+  const body = document.querySelector(".hero-left-body");
+  const hero = document.querySelector(".hero");
+
+  const recomputeHeroHeight = () => {
+    cachedHeroHeight = hero ? hero.getBoundingClientRect().height : 0;
+  };
+  recomputeHeroHeight();
+  window.addEventListener("resize", recomputeHeroHeight, { passive: true });
+
+  let rafId = 0;
+  let navScrolledState = null;
+  const reducedMotion = prefersReducedMotion();
+
+  const update = () => {
+    rafId = 0;
+    const y = window.scrollY;
+
+    // Nav .scrolled toggle — only write when state changes
+    const isScrolled = y > 40;
+    if (nav && isScrolled !== navScrolledState) {
+      nav.classList.toggle("scrolled", isScrolled);
+      navScrolledState = isScrolled;
+    }
+
+    // Dismiss scroll hint once
+    if (y > 50) dismissScrollHint();
+
+    // Hero body lift + fade (skip entirely under reduced motion)
+    if (!reducedMotion && body && cachedHeroHeight > 0 && y <= cachedHeroHeight) {
+      const progress = Math.min(y / Math.max(cachedHeroHeight * 0.6, 1), 1);
+      body.style.transform = `translate3d(0, ${(-progress * 24).toFixed(2)}px, 0)`;
+      body.style.opacity = String(1 - progress * 0.45);
+    }
+  };
+
+  window.addEventListener("scroll", () => {
+    if (!rafId) rafId = requestAnimationFrame(update);
+  }, { passive: true });
+
+  update();
 }
 
 function bindEvents() {
@@ -1160,7 +1210,6 @@ function renderHero() {
   bindHeroParallax();
   bindMagneticEnter();
   bindHeroClick();
-  bindHeroScroll();
   bindHeroKeyboard();
   bindHeroSwipe();
   renderHeroCurrently();
@@ -1319,28 +1368,6 @@ function bindHeroClick() {
   });
 }
 
-function bindHeroScroll() {
-  if (heroScrollBound) return;
-
-  const body = document.querySelector(".hero-left-body");
-  heroScrollBound = true;
-
-  const onScroll = () => {
-    const y = window.scrollY;
-    if (y > 50) dismissScrollHint();
-    if (prefersReducedMotion()) return;
-    const hero = document.querySelector(".hero");
-    if (!hero || !body) return;
-    const maxShift = hero.getBoundingClientRect().height;
-    if (y > maxShift) return;
-    const progress = Math.min(y / Math.max(maxShift * 0.6, 1), 1);
-    body.style.transform = `translateY(${(-progress * 24).toFixed(2)}px)`;
-    body.style.opacity = String(1 - progress * 0.45);
-  };
-
-  window.addEventListener("scroll", onScroll, { passive: true });
-  onScroll();
-}
 
 function scheduleStatsCountUp() {
   if (statsCountedUp) {
@@ -1551,16 +1578,48 @@ function buildHeroCurrentlyLines() {
   return lines;
 }
 
+const CACHE_KEY = "portfolioCache";
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function readCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > CACHE_TTL_MS) return null;
+    return parsed;
+  } catch (_) { return null; }
+}
+
+function writeCache(photos, albums) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      savedAt: Date.now(),
+      photos,
+      albums
+    }));
+  } catch (_) { /* storage full or blocked; non-fatal */ }
+}
+
 async function refresh() {
   try {
     [state.photos, state.albums] = await Promise.all([sbGetAll(), sbAlbumsGetAll()]);
     state.loadError = false;
+    writeCache(state.photos, state.albums);
   } catch (err) {
     console.error("Could not load portfolio data", err);
-    state.photos = state.photos || [];
-    state.albums = state.albums || [];
-    state.loadError = true;
-    setStatus("Could not load portfolio. Check your connection and refresh.");
+    const cached = readCache();
+    if (cached && cached.photos?.length) {
+      state.photos = cached.photos;
+      state.albums = cached.albums || [];
+      state.loadError = false; // we have something to show
+      setStatus("Showing last known state. Refresh when your connection is back.");
+    } else {
+      state.photos = state.photos || [];
+      state.albums = state.albums || [];
+      state.loadError = true;
+      setStatus("Could not load portfolio. Check your connection and refresh.");
+    }
   }
   sortPhotos();
   state.albumGroups = buildAlbumGroups(state.photos, state.albums);
@@ -1617,12 +1676,15 @@ function renderFilmstrip() {
 }
 
 function sortPhotos() {
+  // Starred photos always float to the top, then the chosen secondary
+  // order (newest / oldest / title) applies within each group.
+  const starredFirst = (a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0);
   if (state.sortOrder === "newest") {
-    state.photos.sort((a, b) => (b.orderTimestamp || 0) - (a.orderTimestamp || 0));
+    state.photos.sort((a, b) => starredFirst(a, b) || (b.orderTimestamp || 0) - (a.orderTimestamp || 0));
   } else if (state.sortOrder === "oldest") {
-    state.photos.sort((a, b) => (a.orderTimestamp || 0) - (b.orderTimestamp || 0));
+    state.photos.sort((a, b) => starredFirst(a, b) || (a.orderTimestamp || 0) - (b.orderTimestamp || 0));
   } else if (state.sortOrder === "title") {
-    state.photos.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+    state.photos.sort((a, b) => starredFirst(a, b) || (a.title || "").localeCompare(b.title || ""));
   }
 }
 

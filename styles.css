@@ -92,7 +92,6 @@ body::before {
   opacity: var(--grain-opacity);
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='2' seed='5'/><feColorMatrix values='0 0 0 0 0.08  0 0 0 0 0.07  0 0 0 0 0.06  0 0 0 0.85 0'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>");
   mix-blend-mode: multiply;
-  will-change: transform;
 }
 @media (prefers-reduced-motion: reduce) {
   .film-grain { opacity: calc(var(--grain-opacity) * 0.6); }
