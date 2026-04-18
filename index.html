@@ -133,7 +133,7 @@
         <div class="rule-line"></div>
         <span class="rule-label">Collections</span>
       </div>
-      <button class="btn-ghost hidden" id="newAlbumBtn" type="button" style="margin-bottom:32px;">+ New Collection</button>
+      <button class="btn-ghost hidden" id="newAlbumBtn" type="button">+ New Collection</button>
       <div id="seriesWrap" class="stagger">
         <div class="empty-placeholder">
           Collections appear as the archive grows.
@@ -193,7 +193,7 @@
         <div class="reveal">
           <h2 class="section-display" id="aboutHeadline">Based in the<br>San Francisco Bay Area.</h2>
         </div>
-        <div class="reveal" style="transition-delay:0.1s;">
+        <div class="reveal stagger-2">
           <p class="about-tagline" id="aboutTagline">"Light, place, and the quiet in-between."</p>
           <p class="about-body" id="aboutText">
             I photograph light, place, and the quieter moments that make a frame feel lasting. This portfolio is an evolving edit of work I keep returning to, organized into collections that feel intentional rather than just chronological.
@@ -213,8 +213,8 @@
           <span class="rule-label">Contact</span>
         </div>
         <h2 class="contact-display reveal" id="contactDisplay">Open to commissions,<br>prints &amp; collaborations.</h2>
-        <p class="contact-sub reveal" id="contactSub" style="transition-delay:0.08s;">Available for work in the Bay Area and beyond.</p>
-        <div class="contact-actions reveal" style="transition-delay:0.16s;">
+        <p class="contact-sub reveal stagger-1" id="contactSub">Available for work in the Bay Area and beyond.</p>
+        <div class="contact-actions reveal stagger-3">
           <a class="btn" href="mailto:Trinhanh59@gmail.com" id="contactEmailLink">Trinhanh59@gmail.com</a>
         </div>
       </div>
@@ -288,7 +288,7 @@
       </div>
       <div class="modal-foot">
         <p class="field-note" id="reviewFootNote">Nothing is published until you save.</p>
-        <div style="display:flex;gap:10px;">
+        <div class="form-actions">
           <button class="btn-quiet" id="reviewCancelBtn" type="button">Cancel</button>
           <button class="btn" id="reviewSaveBtn" type="button">Save to portfolio</button>
         </div>
@@ -335,18 +335,18 @@
             <p class="field-note" id="albumNameNote"></p>
           </div>
           <div class="field">
-            <label for="albumDescField">Description <span style="color:var(--muted2);font-weight:300;">optional</span></label>
+            <label for="albumDescField">Description <span class="optional-hint">optional</span></label>
             <textarea id="albumDescField" name="description" placeholder="A short note that frames this body of work..." rows="3"></textarea>
           </div>
           <div class="field">
-            <label for="albumSortField">Collection order <span style="color:var(--muted2);font-weight:300;">optional</span></label>
+            <label for="albumSortField">Collection order <span class="optional-hint">optional</span></label>
             <input id="albumSortField" name="sortOrder" type="number" min="1" step="1" placeholder="Lower numbers appear first" />
             <p class="field-note">Leave blank to let the site order collections automatically.</p>
           </div>
           <p class="field-note">Set a collection cover from any photograph inside that collection.</p>
           <p class="error-msg" id="albumErr" aria-live="polite"></p>
-          <div style="display:flex;gap:10px;justify-content:space-between;align-items:center;">
-            <button type="button" class="btn-danger hidden" id="albumDeleteBtn" style="border-radius:999px;border:1px solid rgba(224,112,112,0.35);color:var(--danger);cursor:pointer;background:transparent;padding:8px 18px;font-size:0.82rem;">
+          <div class="form-actions-spread">
+            <button type="button" class="btn-danger-pill hidden" id="albumDeleteBtn">
               Delete collection
             </button>
             <button class="btn" type="submit">Save collection</button>
@@ -369,7 +369,7 @@
         <p id="confirmMsg">This will permanently remove the photo. It cannot be undone.</p>
         <div class="confirm-actions">
           <button class="btn-quiet" data-close="confirmOverlay" type="button">Cancel</button>
-          <button class="btn btn-danger" id="confirmDeleteBtn" type="button" style="background:#e07070;color:#080808;border-color:transparent;">Delete</button>
+          <button class="btn btn-danger-solid" id="confirmDeleteBtn" type="button">Delete</button>
         </div>
       </div>
     </div>

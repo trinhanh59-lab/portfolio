@@ -503,8 +503,40 @@ button { background: none; }
   background: transparent;
 }
 
+.btn-danger-pill {
+  border-radius: 999px;
+  border: 1px solid rgba(224,112,112,0.35);
+  color: var(--danger);
+  cursor: pointer;
+  background: transparent;
+  padding: 8px 18px;
+  font-size: 0.82rem;
+}
+
+.btn-danger-solid {
+  background: #e07070;
+  color: #080808;
+  border-color: transparent;
+}
+
+.btn-sm {
+  font-size: 0.78rem;
+  min-height: 36px;
+  padding: 7px 16px;
+}
+
 .btn-full { width: 100%; }
 .hidden { display: none !important; }
+
+/* Layout + stagger utilities (replace inline styles) */
+.optional-hint { color: var(--muted2); font-weight: 300; }
+.form-actions { display: flex; gap: 10px; }
+.form-actions-spread { display: flex; gap: 10px; justify-content: space-between; align-items: center; }
+.stagger-1 { transition-delay: 0.08s; }
+.stagger-2 { transition-delay: 0.10s; }
+.stagger-3 { transition-delay: 0.16s; }
+.push-end { margin-left: auto; }
+#newAlbumBtn { margin-bottom: 32px; }
 
 .section {
   padding: clamp(56px, 10vh, 100px) var(--pad);

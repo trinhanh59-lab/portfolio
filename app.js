@@ -1517,21 +1517,21 @@ function renderDetail(photo) {
   if (state.ownerMode) {
     const starred = photo.starred;
     const coverAction = photo.series && photo.cloudinaryId
-      ? `<button class="btn-quiet" data-action="set-cover" data-photo-id="${escA(photo.id)}" style="font-size:0.78rem;min-height:36px;padding:7px 16px;">Set as collection cover</button>`
+      ? `<button class="btn-quiet btn-sm" data-action="set-cover" data-photo-id="${escA(photo.id)}">Set as collection cover</button>`
       : "";
     document.getElementById("detailActions").innerHTML = `
       <button class="star-toggle-btn ${starred ? "starred" : ""}" data-action="star" data-photo-id="${escA(photo.id)}" title="${starred ? "Unfeature" : "Mark as featured"}" aria-label="${starred ? "Unfeature photograph" : "Mark photograph as featured"}">
         ${starred ? "★" : "☆"}
       </button>
-      <button class="btn-ghost" data-action="edit" data-photo-id="${escA(photo.id)}" style="font-size:0.78rem;min-height:36px;padding:7px 16px;">Edit</button>
+      <button class="btn-ghost btn-sm" data-action="edit" data-photo-id="${escA(photo.id)}">Edit</button>
       ${coverAction}
-      <button class="btn-quiet" data-action="download" data-photo-id="${escA(photo.id)}" style="font-size:0.78rem;min-height:36px;padding:7px 16px;">Download</button>
-      <button class="btn-danger" data-action="delete" data-photo-id="${escA(photo.id)}" style="font-size:0.78rem;min-height:36px;padding:7px 16px;border-radius:999px;border:1px solid rgba(224,112,112,0.35);color:var(--danger);cursor:pointer;background:transparent;">Delete</button>
-      <button class="btn-quiet" data-action="close" style="font-size:0.78rem;min-height:36px;padding:7px 16px;margin-left:auto;">Close</button>`;
+      <button class="btn-quiet btn-sm" data-action="download" data-photo-id="${escA(photo.id)}">Download</button>
+      <button class="btn-danger-pill btn-sm" data-action="delete" data-photo-id="${escA(photo.id)}">Delete</button>
+      <button class="btn-quiet btn-sm push-end" data-action="close">Close</button>`;
   } else {
     document.getElementById("detailActions").innerHTML = `
       <a class="btn" href="${escA(buildInquiryLink(photo))}">Inquire about this photograph</a>
-      <button class="btn-quiet" data-action="close" style="font-size:0.78rem;min-height:36px;padding:7px 16px;margin-left:auto;">Close</button>`;
+      <button class="btn-quiet btn-sm push-end" data-action="close">Close</button>`;
   }
 }
 
