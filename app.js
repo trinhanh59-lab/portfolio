@@ -258,6 +258,7 @@ function initScrollReveal() {
 // recomputed on resize). Handles nav .scrolled toggle, scroll-hint
 // dismiss, and the hero body lift/fade together.
 let scrollControllerBound = false;
+let heroVisibilityBound = false;
 
 function initNavScroll() {
   bindUnifiedScroll();
@@ -1218,7 +1219,33 @@ function renderHero() {
   bindHeroClick();
   bindHeroKeyboard();
   bindHeroSwipe();
+  bindHeroVisibility();
   renderHeroCurrently();
+}
+
+function bindHeroVisibility() {
+  if (heroVisibilityBound) return;
+  const hero = document.querySelector(".hero");
+  if (!hero) return;
+  heroVisibilityBound = true;
+  const io = new IntersectionObserver((entries) => {
+    const entry = entries[0];
+    if (!entry) return;
+    const offscreen = !entry.isIntersecting;
+    // Pauses the Ken Burns CSS animation via body.hero-offscreen in
+    // styles.css. Also halts the photo rotation timer so we're not
+    // silently swapping images behind the user's back while they're
+    // looking at the gallery — which is exactly what produces the
+    // "random pictures popping up" feel.
+    document.body.classList.toggle("hero-offscreen", offscreen);
+    if (offscreen && heroRotateTimer) {
+      clearInterval(heroRotateTimer);
+      heroRotateTimer = null;
+    } else if (!offscreen && !heroRotateTimer && heroPhotoPool.length >= 2) {
+      startHeroPhotoRotation();
+    }
+  }, { threshold: 0, rootMargin: "100px 0px 0px 0px" });
+  io.observe(hero);
 }
 
 function isHeroInView() {
@@ -1674,11 +1701,12 @@ function renderFilmstrip() {
   }
 
   section.hidden = false;
-  strip.innerHTML = recent.map(photo => `
+  strip.innerHTML = recent.map((photo, i) => `
     <button type="button" class="filmstrip-tile" data-photo-id="${escA(photo.id)}" aria-label="Open ${escA(photo.title || "photograph")}">
-      <img src="${escA(cloudinaryUrl(photo.cloudinaryId, "w_440,q_auto,f_auto"))}" alt="${escA(photo.title || "Photograph")}" loading="lazy" decoding="async" />
+      <img src="${escA(cloudinaryUrl(photo.cloudinaryId, "w_440,q_auto,f_auto"))}" alt="${escA(photo.title || "Photograph")}" loading="${i < 4 ? "eager" : "lazy"}" decoding="async" />
       <div class="filmstrip-tile-title">${esc(photo.title || "Untitled")}</div>
     </button>`).join("");
+  bindBrickLoadFade(strip);
 }
 
 function sortPhotos() {
@@ -1975,13 +2003,17 @@ function renderGallery() {
     return;
   }
 
-  wrap.innerHTML = `<div class="photo-grid">${photos.map(photo => {
+  wrap.innerHTML = `<div class="photo-grid">${photos.map((photo, i) => {
     const src = cloudinaryUrl(photo.cloudinaryId, "w_900,q_auto,f_auto");
     const starBadge = photo.starred ? `<div class="photo-star-badge">★</div>` : "";
     const metaText = compact([photo.series, photo.location]);
+    // Eager-load the first ~12 so the masonry settles before the
+    // user scrolls past. Lazy-load the rest.
+    const loading = i < 12 ? "eager" : "lazy";
+    const fetchPri = i < 4 ? ` fetchpriority="high"` : "";
     return `
-      <button type="button" class="photo-brick reveal-fast" data-photo-id="${escA(photo.id)}" aria-label="Open ${escA(photo.title || "photograph")}">
-        <img src="${escA(src)}" alt="${escA(photo.title || "Photograph")}" loading="lazy" decoding="async" />
+      <button type="button" class="photo-brick" data-photo-id="${escA(photo.id)}" aria-label="Open ${escA(photo.title || "photograph")}">
+        <img src="${escA(src)}" alt="${escA(photo.title || "Photograph")}" loading="${loading}"${fetchPri} decoding="async" />
         ${starBadge}
         <div class="photo-brick-overlay">
           <div class="photo-brick-title">${esc(photo.title || "Untitled")}</div>
@@ -1990,7 +2022,26 @@ function renderGallery() {
       </button>`;
   }).join("")}</div>`;
 
-  observeRevealables(wrap);
+  bindBrickLoadFade(wrap);
+}
+
+function bindBrickLoadFade(root) {
+  // Each photo brick starts hidden; we fade it in only once its image
+  // is actually loaded. This eliminates the "empty placeholder eases in,
+  // then the photo pops into the placeholder half a second later" effect.
+  const bricks = root.querySelectorAll(".photo-brick, .filmstrip-tile");
+  bricks.forEach(brick => {
+    if (brick.classList.contains("loaded")) return;
+    const img = brick.querySelector("img");
+    if (!img) { brick.classList.add("loaded"); return; }
+    if (img.complete && img.naturalWidth > 0) {
+      brick.classList.add("loaded");
+      return;
+    }
+    const ready = () => brick.classList.add("loaded");
+    img.addEventListener("load", ready, { once: true });
+    img.addEventListener("error", ready, { once: true });
+  });
 }
 
 function emptyActions(noPhotos) {
