@@ -1,0 +1,30 @@
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: '0 13 */6 * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping Supabase REST API
+        env:
+          SUPABASE_URL: https://beanpxolozlggbwdoqjl.supabase.co
+          SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlYW5weG9sb3psZ2did2RvcWpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3Mjk5ODgsImV4cCI6MjA5MDMwNTk4OH0.isvxqR-lIk8nchcGdBBXq9OQ2COIyr4AnDO6hOxzLHc
+        run: |
+          set -e
+          echo "Pinging $SUPABASE_URL at $(date -u)"
+          STATUS=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "$SUPABASE_URL/rest/v1/photos?limit=1&select=id")
+          echo "HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "Unexpected status — response body:"
+            cat /tmp/resp.json
+            exit 1
+          fi
+          echo "Supabase is alive."
