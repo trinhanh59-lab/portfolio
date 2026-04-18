@@ -43,6 +43,46 @@ body::before {
   transition: background 2s ease;
 }
 
+/* First-visit intro overlay: dark canvas with one word, fades out. */
+.intro-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: #0e0d0b;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition: opacity 0.9s ease;
+}
+.intro-overlay.show { display: flex; pointer-events: auto; }
+.intro-overlay.fade-out { opacity: 0; }
+.intro-word {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 300;
+  font-size: clamp(3rem, 7vw, 5.5rem);
+  color: #f2ede4;
+  letter-spacing: -0.02em;
+  opacity: 0;
+  transform: translateY(14px);
+  animation: introWordIn 1.1s var(--ease) 0.1s forwards;
+}
+@keyframes introWordIn {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Nav brand signature draw-in on first load. */
+.nav-brand {
+  display: inline-block;
+  position: relative;
+  clip-path: inset(0 100% 0 0);
+  animation: navBrandDraw 1.1s var(--ease) 0.4s forwards;
+}
+@keyframes navBrandDraw {
+  to { clip-path: inset(0 0 0 0); }
+}
+
 /* Film-grain overlay — static noise, tiled, multiply blend. */
 .film-grain {
   position: fixed;

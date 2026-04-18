@@ -83,9 +83,12 @@ const MAX_UPLOAD_MB   = 20;
 const MAX_DIMENSION   = 4800;
 const COMPRESS_THRESH = 8;
 
+const INTRO_SEEN_KEY = "introSeen";
+
 document.addEventListener("DOMContentLoaded", async () => {
   applySiteContent();
   applyTimeOfDay();
+  maybeShowIntro();
   enhanceHeroTitle();
   initScrollReveal();
   initNavScroll();
@@ -100,6 +103,29 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   await refresh();
 });
+
+function maybeShowIntro() {
+  try {
+    if (localStorage.getItem(INTRO_SEEN_KEY) === "1") return;
+  } catch (_) { /* private mode or storage blocked — run once per load */ }
+
+  if (prefersReducedMotion()) {
+    try { localStorage.setItem(INTRO_SEEN_KEY, "1"); } catch (_) {}
+    return;
+  }
+
+  const overlay = document.getElementById("introOverlay");
+  if (!overlay) return;
+  overlay.classList.add("show");
+
+  setTimeout(() => {
+    overlay.classList.add("fade-out");
+    setTimeout(() => {
+      overlay.classList.remove("show", "fade-out");
+      try { localStorage.setItem(INTRO_SEEN_KEY, "1"); } catch (_) {}
+    }, 900);
+  }, 1600);
+}
 
 function applyTimeOfDay() {
   const hour = new Date().getHours();
