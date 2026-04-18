@@ -19,6 +19,43 @@ html { scroll-behavior: smooth; }
   --max:     1400px;
   --ease:    cubic-bezier(0.16, 1, 0.3, 1);
   --pad:     clamp(24px, 4vw, 64px);
+  --grain-opacity: 0.055;
+  --ambient-warm: 0;
+}
+
+/* Time-of-day ambient shift. Warmer at golden hour, cooler late night.
+   Shifts the base bg color temperature by a few degrees via a tint
+   overlay on body. Very subtle. */
+body.time-dawn    { --ambient-warm: 0.02; }
+body.time-morning { --ambient-warm: 0.04; }
+body.time-midday  { --ambient-warm: 0.00; }
+body.time-dusk    { --ambient-warm: 0.08; }
+body.time-night   { --ambient-warm: 0.05; }
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(224,150,80,var(--ambient-warm)) 0%, rgba(200,120,60,calc(var(--ambient-warm) * 0.6)) 100%);
+  pointer-events: none;
+  z-index: 1;
+  mix-blend-mode: multiply;
+  transition: background 2s ease;
+}
+
+/* Film-grain overlay — static noise, tiled, multiply blend. */
+.film-grain {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  opacity: var(--grain-opacity);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='2' seed='5'/><feColorMatrix values='0 0 0 0 0.08  0 0 0 0 0.07  0 0 0 0 0.06  0 0 0 0.85 0'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>");
+  mix-blend-mode: multiply;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .film-grain { opacity: calc(var(--grain-opacity) * 0.6); }
 }
 
 body {

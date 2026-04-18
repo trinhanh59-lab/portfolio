@@ -82,6 +82,7 @@ const COMPRESS_THRESH = 8;
 
 document.addEventListener("DOMContentLoaded", async () => {
   applySiteContent();
+  applyTimeOfDay();
   enhanceHeroTitle();
   initScrollReveal();
   initNavScroll();
@@ -96,6 +97,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   await refresh();
 });
+
+function applyTimeOfDay() {
+  const hour = new Date().getHours();
+  let slot = "midday";
+  if (hour >= 5 && hour < 8)   slot = "dawn";
+  else if (hour >= 8 && hour < 11)  slot = "morning";
+  else if (hour >= 11 && hour < 16) slot = "midday";
+  else if (hour >= 16 && hour < 20) slot = "dusk";
+  else                               slot = "night";
+  document.body.classList.add(`time-${slot}`);
+}
 
 function applySiteContent() {
   document.title = SITE.pageTitle;
