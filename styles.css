@@ -351,7 +351,25 @@ button { background: none; }
   opacity: 0;
   animation: fadeUp 1.1s var(--ease) 0.45s forwards;
 }
+/* When JS has wrapped words in spans, drop the whole-title animation
+   so the per-word stagger drives the reveal instead. */
+.hero-title[data-enhanced="1"] {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
 .hero-title em { font-style: italic; color: var(--accent); }
+.hero-title .hero-word {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(26px);
+  animation: heroWordUp 0.9s var(--ease) forwards;
+  animation-delay: calc(0.45s + var(--i, 0) * 0.08s);
+}
+@keyframes heroWordUp {
+  from { opacity: 0; transform: translateY(26px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 
 .hero-copy {
   color: var(--muted);
@@ -451,6 +469,14 @@ button { background: none; }
   overflow: hidden;
 }
 
+.hero-photo-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  max-width: 100%;
+}
+
 .hero-photo-frame {
   position: relative;
   max-width: 100%;
@@ -470,12 +496,74 @@ button { background: none; }
   object-fit: contain;
   display: block;
   opacity: 0;
-  animation: fadeIn 1.4s var(--ease) 0.6s forwards;
+  animation:
+    fadeIn 1.4s var(--ease) 0.6s forwards,
+    kenBurns 24s ease-in-out 2.2s infinite alternate;
   box-shadow: 0 8px 60px rgba(28,26,23,0.12);
-  transition: opacity 0.7s ease;
-  will-change: opacity;
+  transition: opacity 0.7s ease, filter 0.4s ease;
+  will-change: opacity, transform;
+  transform-origin: center center;
 }
 .hero-photo:not([src]), .hero-photo[src=""] { display: none; }
+
+@keyframes kenBurns {
+  0%   { transform: scale(1.0); }
+  100% { transform: scale(1.045); }
+}
+
+/* Clickable hero photo affordance */
+.hero-photo-frame.clickable { cursor: zoom-in; }
+.hero-photo-frame.clickable::after {
+  content: "View photograph";
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: rgba(242,237,228,0.92);
+  padding: 8px 14px;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+}
+.hero-photo-frame.clickable:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.hero-photo-frame.clickable:hover .hero-photo { filter: brightness(0.92); }
+
+/* Slide indicator dots under the hero photo */
+.hero-photo-dots {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  justify-content: center;
+  opacity: 0;
+  animation: fadeIn 0.8s ease 2s forwards;
+}
+.hero-photo-dots .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text);
+  opacity: 0.22;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+.hero-photo-dots .dot.active {
+  opacity: 0.88;
+  transform: scale(1.35);
+}
+.hero-photo-dots .dot:hover { opacity: 0.6; }
 
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(18px); }

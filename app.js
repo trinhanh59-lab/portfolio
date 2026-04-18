@@ -67,6 +67,12 @@ let heroParallaxBound = false;
 let magneticEnterBound = false;
 let heroHoverPaused = false;
 let heroHoverBound = false;
+let heroClickBound = false;
+let heroScrollBound = false;
+let statsCountedUp = false;
+let currentHeroPhoto = null;
+let heroPhotoPool = [];
+let heroPhotoIdx = 0;
 
 const OVERLAYS = ["loginOverlay", "reviewOverlay", "detailOverlay", "confirmOverlay", "albumOverlay"];
 const RAW_EXTENSIONS  = /\.(raf|cr2|cr3|nef|nrw|arw|srw|srf|orf|rw2|pef|dng|3fr|mef|mrw|rwl|x3f|iiq)$/i;
@@ -76,6 +82,7 @@ const COMPRESS_THRESH = 8;
 
 document.addEventListener("DOMContentLoaded", async () => {
   applySiteContent();
+  enhanceHeroTitle();
   initScrollReveal();
   initNavScroll();
   bindEvents();
@@ -371,6 +378,14 @@ function bindEvents() {
       if (type === "star") toggleStar(photoId);
       if (type === "set-cover") setAlbumCover(photoId);
       if (type === "close") closeOverlay("detailOverlay");
+      return;
+    }
+
+    const heroDot = e.target.closest("[data-hero-dot]");
+    if (heroDot) {
+      e.stopPropagation();
+      const idx = Number(heroDot.dataset.heroDot);
+      if (!Number.isNaN(idx)) setHeroSlide(idx);
       return;
     }
 
@@ -1074,32 +1089,86 @@ function renderHero() {
   const pool = starred.length ? starred : anyWithCover;
   const cover = pool[0];
   const el = document.getElementById("heroCoverImg");
+  const frame = document.getElementById("heroPhotoFrame");
   if (!el) return;
+
+  heroPhotoPool = pool;
+  heroPhotoIdx = 0;
+  currentHeroPhoto = cover || null;
 
   if (cover) {
     el.src = cloudinaryUrl(cover.cloudinaryId, "w_1600,q_80,f_auto");
     el.alt = cover.title ? `Featured photograph: ${cover.title}` : "Featured photograph";
     el.classList.remove("hidden");
+    frame?.classList.add("clickable");
     updateSocialImage(cloudinaryUrl(cover.cloudinaryId, "w_1200,q_80,f_auto"));
   } else {
     el.removeAttribute("src");
     el.alt = "Featured photograph";
     el.classList.add("hidden");
+    frame?.classList.remove("clickable");
     updateSocialImage(defaultSocialImageUrl());
   }
 
-  startHeroPhotoRotation(pool);
+  renderHeroDots();
+  startHeroPhotoRotation();
   bindHeroParallax();
   bindMagneticEnter();
+  bindHeroClick();
+  bindHeroScroll();
   renderHeroCurrently();
 }
 
-function startHeroPhotoRotation(pool) {
+function renderHeroDots() {
+  const wrap = document.getElementById("heroPhotoDots");
+  if (!wrap) return;
+  if (heroPhotoPool.length < 2) {
+    wrap.innerHTML = "";
+    return;
+  }
+  wrap.innerHTML = heroPhotoPool.map((_, i) =>
+    `<button type="button" class="dot ${i === heroPhotoIdx ? "active" : ""}" data-hero-dot="${i}" aria-label="Show hero photograph ${i + 1}"></button>`
+  ).join("");
+}
+
+function setHeroSlide(newIdx, { resetTimer = true } = {}) {
+  if (!heroPhotoPool.length) return;
+  const next = heroPhotoPool[newIdx % heroPhotoPool.length];
+  if (!next?.cloudinaryId) return;
+  heroPhotoIdx = newIdx % heroPhotoPool.length;
+  currentHeroPhoto = next;
+
+  const el = document.getElementById("heroCoverImg");
+  if (!el) return;
+  const nextUrl = cloudinaryUrl(next.cloudinaryId, "w_1600,q_80,f_auto");
+
+  const preload = new Image();
+  preload.onload = () => {
+    el.style.opacity = "0";
+    setTimeout(() => {
+      el.src = nextUrl;
+      el.alt = next.title ? `Featured photograph: ${next.title}` : "Featured photograph";
+      el.onload = () => { el.style.opacity = "1"; };
+      el.onerror = () => { el.style.opacity = "1"; };
+    }, 700);
+  };
+  preload.onerror = () => { /* skip */ };
+  preload.src = nextUrl;
+
+  // Update dot states
+  document.querySelectorAll("#heroPhotoDots .dot").forEach((dot, i) => {
+    dot.classList.toggle("active", i === heroPhotoIdx);
+  });
+
+  if (resetTimer) startHeroPhotoRotation();
+}
+
+function startHeroPhotoRotation() {
   if (heroRotateTimer) {
     clearInterval(heroRotateTimer);
     heroRotateTimer = null;
   }
-  if (!pool || pool.length < 2) return;
+  if (heroPhotoPool.length < 2) return;
   if (prefersReducedMotion()) return;
 
   const el = document.getElementById("heroCoverImg");
@@ -1114,28 +1183,140 @@ function startHeroPhotoRotation(pool) {
     }
   }
 
-  let idx = 0;
   heroRotateTimer = setInterval(() => {
     if (heroHoverPaused || document.hidden) return;
-    idx = (idx + 1) % pool.length;
-    const next = pool[idx];
-    if (!next?.cloudinaryId) return;
-    const nextUrl = cloudinaryUrl(next.cloudinaryId, "w_1600,q_80,f_auto");
-
-    // Preload so there's no flash mid-fade.
-    const preload = new Image();
-    preload.onload = () => {
-      el.style.opacity = "0";
-      setTimeout(() => {
-        el.src = nextUrl;
-        el.alt = next.title ? `Featured photograph: ${next.title}` : "Featured photograph";
-        el.onload = () => { el.style.opacity = "1"; };
-        el.onerror = () => { el.style.opacity = "1"; };
-      }, 700);
-    };
-    preload.onerror = () => { /* skip this slide */ };
-    preload.src = nextUrl;
+    setHeroSlide(heroPhotoIdx + 1, { resetTimer: false });
   }, 9000);
+}
+
+function bindHeroClick() {
+  if (heroClickBound) return;
+  const frame = document.getElementById("heroPhotoFrame");
+  if (!frame) return;
+  heroClickBound = true;
+
+  frame.addEventListener("click", (e) => {
+    // Don't fire when user clicks a dot
+    if (e.target.closest("[data-hero-dot]")) return;
+    if (!currentHeroPhoto?.id) return;
+    openDetail(currentHeroPhoto.id);
+  });
+}
+
+function bindHeroScroll() {
+  if (heroScrollBound) return;
+  if (prefersReducedMotion()) return;
+
+  const body = document.querySelector(".hero-left-body");
+  if (!body) return;
+  heroScrollBound = true;
+
+  const onScroll = () => {
+    const y = window.scrollY;
+    const hero = document.querySelector(".hero");
+    if (!hero) return;
+    const maxShift = hero.getBoundingClientRect().height;
+    if (y > maxShift) return; // past hero, no work needed
+    const progress = Math.min(y / Math.max(maxShift * 0.6, 1), 1);
+    body.style.transform = `translateY(${(-progress * 24).toFixed(2)}px)`;
+    body.style.opacity = String(1 - progress * 0.45);
+  };
+
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+}
+
+function scheduleStatsCountUp() {
+  if (statsCountedUp) {
+    // Re-render: numbers changed, so snap-update them.
+    updateStatsSnap();
+    return;
+  }
+  if (prefersReducedMotion()) {
+    updateStatsSnap();
+    statsCountedUp = true;
+    return;
+  }
+
+  const targets = [
+    { id: "statPhotos",   value: state.photos.length },
+    { id: "statAlbums",   value: state.albumGroups.length },
+    { id: "statFeatured", value: state.photos.filter(p => p.starred).length }
+  ];
+
+  const run = () => {
+    if (statsCountedUp) return;
+    statsCountedUp = true;
+    targets.forEach(({ id, value }) => animateCountUp(id, value, 1200));
+  };
+
+  const first = document.getElementById(targets[0].id);
+  if (!first) return;
+  const io = new IntersectionObserver((entries) => {
+    if (entries.some(e => e.isIntersecting)) {
+      io.disconnect();
+      run();
+    }
+  }, { threshold: 0.2 });
+  io.observe(first);
+}
+
+function updateStatsSnap() {
+  document.getElementById("statPhotos").textContent = state.photos.length;
+  document.getElementById("statAlbums").textContent = state.albumGroups.length;
+  document.getElementById("statFeatured").textContent = state.photos.filter(p => p.starred).length;
+}
+
+function animateCountUp(id, target, duration) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (target === 0) { el.textContent = "0"; return; }
+  const start = performance.now();
+  const from = 0;
+  function tick(now) {
+    const t = Math.min((now - start) / duration, 1);
+    // easeOutCubic
+    const eased = 1 - Math.pow(1 - t, 3);
+    const val = Math.round(from + (target - from) * eased);
+    el.textContent = val;
+    if (t < 1) requestAnimationFrame(tick);
+    else el.textContent = target;
+  }
+  requestAnimationFrame(tick);
+}
+
+function enhanceHeroTitle() {
+  const el = document.getElementById("heroTitle");
+  if (!el || el.dataset.enhanced === "1") return;
+  el.dataset.enhanced = "1";
+
+  // Walk text nodes inside heroTitle and wrap each word in a span.
+  // This preserves existing <em>, <br>, etc.
+  let wordIndex = 0;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) textNodes.push(node);
+
+  textNodes.forEach(textNode => {
+    const parent = textNode.parentNode;
+    const frag = document.createDocumentFragment();
+    const parts = textNode.nodeValue.split(/(\s+)/); // keep whitespace
+    parts.forEach(part => {
+      if (!part) return;
+      if (/^\s+$/.test(part)) {
+        frag.appendChild(document.createTextNode(part));
+      } else {
+        const span = document.createElement("span");
+        span.className = "hero-word";
+        span.style.setProperty("--i", String(wordIndex));
+        span.textContent = part;
+        frag.appendChild(span);
+        wordIndex += 1;
+      }
+    });
+    parent.replaceChild(frag, textNode);
+  });
 }
 
 function bindHeroParallax() {
@@ -1311,9 +1492,7 @@ function filtered() {
 }
 
 function renderStats() {
-  document.getElementById("statPhotos").textContent = state.photos.length;
-  document.getElementById("statAlbums").textContent = state.albumGroups.length;
-  document.getElementById("statFeatured").textContent = state.photos.filter(photo => photo.starred).length;
+  scheduleStatsCountUp();
 }
 
 function buildAlbumGroups(photos, albums) {
