@@ -259,6 +259,9 @@ function initScrollReveal() {
 // dismiss, and the hero body lift/fade together.
 let scrollControllerBound = false;
 let heroVisibilityBound = false;
+let preloadInFlight = 0;
+let preloadScheduled = false;
+const preloadedUrls = new Set();
 
 function initNavScroll() {
   bindUnifiedScroll();
@@ -1672,6 +1675,78 @@ async function refresh() {
   renderFilmstrip();
   initScrollReveal();
   handlePhotoHash();
+  schedulePhotoPreload();
+}
+
+// Background image preloader.
+//
+// Native lazy-loading is fine when the user scrolls slowly, but if they
+// scroll fast or land directly on a section deep in the page, bricks
+// reveal before their images have time to stream in — which is what
+// the "random pictures popping up" feels like.
+//
+// Right after the initial render settles, we queue up every gallery-
+// sized and filmstrip-sized URL and walk them with bounded concurrency.
+// Each fetch populates the browser's HTTP cache, so when the native
+// lazy loader later requests the same URL for a brick, it comes back
+// instantly and the brick fades in immediately.
+//
+// Scheduled via requestIdleCallback (falling back to setTimeout) so we
+// don't compete with the hero photo or CSS load.
+function schedulePhotoPreload() {
+  if (preloadScheduled) return;
+  if (!state.photos?.length) return;
+  preloadScheduled = true;
+  const run = () => {
+    preloadScheduled = false;
+    preloadPhotoImages();
+  };
+  if (window.requestIdleCallback) {
+    window.requestIdleCallback(run, { timeout: 3000 });
+  } else {
+    setTimeout(run, 800);
+  }
+}
+
+function preloadPhotoImages() {
+  // Build the queue from the current state — dedup via preloadedUrls
+  // so subsequent refreshes only pick up newly added photos.
+  const queue = [];
+  for (const p of state.photos) {
+    if (!p.cloudinaryId) continue;
+    const url = cloudinaryUrl(p.cloudinaryId, "w_900,q_auto,f_auto");
+    if (!preloadedUrls.has(url)) queue.push(url);
+  }
+  const recent = [...state.photos]
+    .filter(p => p.cloudinaryId)
+    .sort((a, b) => (b.orderTimestamp || 0) - (a.orderTimestamp || 0))
+    .slice(0, 10);
+  for (const p of recent) {
+    const url = cloudinaryUrl(p.cloudinaryId, "w_440,q_auto,f_auto");
+    if (!preloadedUrls.has(url)) queue.push(url);
+  }
+
+  if (!queue.length) return;
+
+  const concurrency = 4;
+  let idx = 0;
+
+  const pump = () => {
+    while (preloadInFlight < concurrency && idx < queue.length) {
+      const url = queue[idx++];
+      preloadedUrls.add(url);
+      const img = new Image();
+      preloadInFlight += 1;
+      const done = () => {
+        preloadInFlight -= 1;
+        pump();
+      };
+      img.onload = done;
+      img.onerror = done;
+      img.src = url;
+    }
+  };
+  pump();
 }
 
 function handlePhotoHash() {
