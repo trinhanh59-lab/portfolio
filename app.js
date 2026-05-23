@@ -1,15 +1,15 @@
 const SITE = {
   name: "Anh Trinh",
   pageTitle: "Anh Trinh | Photography",
-  metaDescription: "Photography portfolio by Anh Trinh, featuring quiet, place-driven work from the San Francisco Bay Area and beyond.",
-  eyebrow: "Photography · San Francisco Bay Area",
+  metaDescription: "A working notebook of photographs by Anh Trinh — light, place, and the quiet in-between, from the San Francisco Bay Area.",
+  eyebrow: "Field notebook · Vol. III · MMXXVI",
   heroTitle: "Photographs<br>made with <em>quiet intention.</em>",
-  heroText: "A running body of work from the Bay Area and beyond, centered on light, place, and the pause between moments.",
+  heroText: "A running body of work — light, place, and the long quiet between the worth-keeping frames. Made here in the Bay Area, mostly on foot.",
   aboutHeadline: "Based in the<br>San Francisco Bay Area.",
-  aboutTagline: "\"Light, place, and the quiet in-between.\"",
-  aboutText: "I photograph light, place, and the quieter moments that make a frame feel lasting. This portfolio is an evolving edit of work I keep returning to, organized into collections that feel intentional rather than just chronological.",
-  contactDisplay: "Open to commissions,<br>prints &amp; collaborations.",
-  contactSub: "Available for work in the Bay Area and beyond.",
+  aboutTagline: "Light, place, and the quiet in-between.",
+  aboutText: "I'm Anh — I keep a camera close and a list of places I want to revisit on better light. This site is less a portfolio and more a working notebook: photographs I keep returning to, grouped into small collections instead of dumped chronologically. Some are five minutes from home, others a slow drive up the coast. If something here lingers with you, that's the whole point.",
+  contactDisplay: "If something here<br><em>lingered</em>, say so.",
+  contactSub: "No pitch, no list — just a note if a photograph stayed with you, or you want to trade favourite places to walk in the Bay.",
   location: "San Francisco Bay Area",
   email: "Trinhanh59@gmail.com",
   instagramUrl: "https://instagram.com/",
@@ -92,7 +92,7 @@ function applySiteContent() {
   setText("aboutText", SITE.aboutText);
   setHTML("contactDisplay", SITE.contactDisplay);
   setText("contactSub", SITE.contactSub);
-  setText("footerSecretTrigger", `© ${SITE.name} · ${SITE.location}`);
+  setText("footerSecretTrigger", `© ${SITE.name} · ${SITE.location} · MMXXVI`);
 
   const mailto = `mailto:${SITE.email}`;
   setAttr("contactEmailBtn", "href", mailto);
