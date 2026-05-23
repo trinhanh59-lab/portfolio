@@ -1,0 +1,152 @@
+name: Weekly portfolio review
+
+on:
+  schedule:
+    # Every Monday at 14:00 UTC (07:00 PT)
+    - cron: "0 14 * * MON"
+  workflow_dispatch:
+
+permissions:
+  contents: write       # create branches + push
+  pull-requests: write  # open draft PRs
+  issues: write         # open needs-approval issues
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Ensure needs-approval label exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create "needs-approval" \
+            --color "FBCA04" \
+            --description "Requires owner approval before action" \
+            2>/dev/null || true
+
+      - name: Run review orchestrator
+        uses: anthropics/claude-code-base-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          allowed_tools: "Read,Edit,Write,Bash,Task,Grep,Glob"
+          prompt: |
+            You are running inside a GitHub Actions weekly review of the
+            trinhanh59-lab/portfolio repository — Anh Trinh's photography
+            portfolio. The main branch is checked out at $GITHUB_WORKSPACE.
+            gh CLI is authenticated via $GH_TOKEN. git is configured for
+            github-actions[bot]. Stack: vanilla HTML/CSS/JS, Supabase REST,
+            ImageKit, Netlify deploy. No build step. No test suite.
+
+            Run the three-agent review pipeline below.
+
+            STEP 1 — Spawn three sub-agents IN PARALLEL via the Task tool
+            (single message, three Task calls):
+
+              (a) Frontend Reviewer (general-purpose):
+                  Audit index.html and styles.css end-to-end. Look for:
+                  WCAG AA accessibility issues, mobile/responsive bugs,
+                  broken in-page anchors (#id with no matching element),
+                  missing alt/aria attributes, contrast failures, copy
+                  errors/typos, dead CSS rules, and inconsistencies with
+                  the established atelier/olive design (see recent
+                  commits). Return a markdown report. Per finding:
+                  severity (critical/high/medium/low/typo), file:line,
+                  description, recommended fix.
+
+              (b) Backend Reviewer (general-purpose):
+                  Audit app.js end-to-end. Look for: logic bugs, error
+                  handling gaps, incorrect Supabase REST queries (table
+                  is "photos" and "albums"), ImageKit upload-path issues,
+                  race conditions, memory leaks, dead code, unused state,
+                  security concerns. Note: SUPABASE_KEY is intentionally
+                  public — it's an anon key. Only flag if something else
+                  is exposed. Return a markdown report with severity,
+                  line refs, fixes.
+
+              (c) Cross-Reference Reviewer (general-purpose):
+                  Independently scan the repo for: HTML id refs vs JS
+                  lookups (every getElementById should match an existing
+                  id), CSS classes used vs defined, GitHub Actions
+                  workflow correctness, netlify.toml validity, and any
+                  cross-file inconsistencies. Return a markdown report.
+
+            STEP 2 — Send the three reports to a Verifier sub-agent
+            (general-purpose) with the prompt: "Cross-check these three
+            review reports. For each finding: confirm or reject. Mark
+            false positives. Flag disagreements between reviewers. Add
+            anything you noticed they all missed. Return the final
+            triaged finding list with severity preserved."
+
+            STEP 3 — Triage the Verifier's list:
+
+              AUTO-FIX TIER (apply now in a single draft PR):
+                - Typos in user-visible copy, comments, strings
+                - Dead code, unused variables/imports/CSS
+                - Missing alt="" on decorative <img>, missing aria-labels
+                - Broken in-page anchors
+                - Stale TODO/FIXME whose subjects are clearly resolved
+                - Whitespace/formatting inconsistencies
+                - Obviously broken markup
+
+              NEEDS-APPROVAL TIER (open issue with label "needs-approval",
+              do NOT touch code):
+                - Copy changes beyond typo correction
+                - Layout / structural CSS changes
+                - Supabase query changes, ImageKit changes, auth-touching
+                  code, schema changes
+                - New features
+                - Behavior-changing refactors
+                - Performance optimizations
+
+              SKIP:
+                - Findings the Verifier rejected
+                - NEEDS-APPROVAL items with severity below medium
+
+            STEP 4 — If there are auto-fix items:
+              1. Create a branch:
+                   git checkout -b chore/weekly-review-$(date -u +%Y-%m-%d)
+              2. Apply each fix using the Edit tool.
+              3. Commit:
+                   git add -A && git commit -m "chore: weekly review — N safe fixes"
+              4. Push:
+                   git push -u origin HEAD
+              5. Open draft PR:
+                   gh pr create --draft \
+                     --base main \
+                     --title "Weekly review YYYY-MM-DD — N safe fixes" \
+                     --body "<full Verifier report as markdown>"
+
+            STEP 5 — For each NEEDS-APPROVAL finding with severity ≥ medium,
+            open an issue:
+              gh issue create \
+                --label "needs-approval" \
+                --title "<short summary>" \
+                --body "<full finding + proposed fix + Verifier assessment>"
+
+            STEP 6 — Print exactly one summary line to stdout:
+              "Opened X PR(s), Y issue(s), Z findings skipped"
+              or "No findings this week"
+
+            HARD CONSTRAINTS:
+              - Never push to main. Branch only. PRs must be draft.
+              - Never merge or close anything.
+              - Total wall time budget: 25 minutes.
+              - If any git/gh operation fails, open ONE issue titled
+                "Pipeline error: <short>" describing the failure. Do not
+                silently exit.
+              - Stay focused on real issues. A clean run with no findings
+                is a valid and good outcome — do not invent findings to
+                justify opening something.
+        env:
+          GH_TOKEN: ${{ github.token }}
