@@ -503,7 +503,7 @@ button { background: none; }
 .btn-quiet:hover { color: var(--text); }
 
 .btn-danger {
-  border-color: rgba(90,107,60,0.35);
+  border-color: rgba(193,74,58,0.35);
   color: var(--danger);
   background: transparent;
 }
