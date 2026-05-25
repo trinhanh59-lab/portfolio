@@ -279,10 +279,6 @@ function bindEvents() {
     setMobileMenu(menu.hidden);
   });
 
-  document.querySelectorAll("[data-nav-close]").forEach(link => {
-    link.addEventListener("click", () => setMobileMenu(false));
-  });
-
   document.getElementById("mobileMenu").addEventListener("click", e => {
     if (e.target.id === "mobileMenu") setMobileMenu(false);
   });
@@ -296,6 +292,11 @@ function bindEvents() {
   window.addEventListener("hashchange", handleOwnerHash);
 
   document.addEventListener("click", e => {
+    const navClose = e.target.closest("[data-nav-close]");
+    if (navClose) {
+      setMobileMenu(false);
+    }
+
     const closer = e.target.closest("[data-close]");
     if (closer) {
       closeOverlay(closer.dataset.close);
@@ -366,6 +367,15 @@ function bindEvents() {
   });
 
   document.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") {
+      const activeEl = document.activeElement;
+      if (activeEl && activeEl.classList.contains("series-tile")) {
+        e.preventDefault();
+        activeEl.click();
+        return;
+      }
+    }
+
     if ((e.altKey || (e.ctrlKey && e.shiftKey)) && e.key.toLowerCase() === "o") {
       openOwnerAccess();
       return;
@@ -588,10 +598,10 @@ async function processFiles(files) {
 
     for (let i = 0; i < files.length; i += 1) {
       const label = files.length > 1 ? ` (${i + 1}/${files.length})` : "";
-      setStatus(`Reading metadata${label}...`);
-      const meta = await extractMeta(files[i]);
 
       try {
+        setStatus(`Reading metadata${label}...`);
+        const meta = await extractMeta(files[i]);
         const preparedFile = await prepareFile(files[i], label);
         const previewUrl = URL.createObjectURL(preparedFile);
         reviewUrls.push(previewUrl);
@@ -1171,7 +1181,7 @@ function renderSeries() {
       ? `<div class="series-tile-desc">${esc(group.description)}</div>`
       : "";
     return `
-      <button type="button" class="series-tile reveal ${group.cover ? "" : "no-cover"}" data-series="${escA(group.name)}" aria-label="Open collection ${escA(group.name)}">
+      <div role="button" tabindex="0" class="series-tile reveal ${group.cover ? "" : "no-cover"}" data-series="${escA(group.name)}" aria-label="Open collection ${escA(group.name)}">
         ${bgLayer}
         ${editBtn}
         <div class="series-tile-content">
@@ -1180,7 +1190,7 @@ function renderSeries() {
           ${descText}
           <div class="series-tile-date">${esc(group.latestDate || "Recently added")}</div>
         </div>
-      </button>`;
+      </div>`;
   }).join("")}</div>`;
 }
 
@@ -1733,7 +1743,11 @@ function escA(value) {
 
 function fmtDateInput(value) {
   if (!value) return "";
-  const date = value instanceof Date ? value : new Date(value);
+  let cleanValue = value;
+  if (typeof value === "string" && /^\d{4}:\d{2}:\d{2}/.test(value)) {
+    cleanValue = value.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
+  }
+  const date = cleanValue instanceof Date ? cleanValue : new Date(cleanValue);
   if (Number.isNaN(date.getTime())) return "";
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
