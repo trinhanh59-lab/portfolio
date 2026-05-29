@@ -16,6 +16,16 @@ const SITE = {
   siteUrl: ""
 };
 
+// Live "right now" strip in the hero. Weather is from Open-Meteo (no API key needed).
+// To re-base the site, change lat/lon/timezone/label. unit: "fahrenheit" or "celsius".
+const PLACE = {
+  label:    "San Francisco Bay Area",
+  lat:      37.7749,
+  lon:      -122.4194,
+  timezone: "America/Los_Angeles",
+  unit:     "fahrenheit"
+};
+
 const OWNER_PASSWORD = "1077";
 
 const IMAGEKIT_ID          = "sphopalr1";
@@ -47,6 +57,9 @@ const state = {
   searchQ:         "",
   sortOrder:       "newest",
   activeId:        null,
+  heroPhotoId:     null,
+  contactPhotoId:  null,
+  aboutPhotoId:    null,
   reviewMode:      "create",
   reviewQueue:     [],
   reviewUrls:      [],
@@ -69,6 +82,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   applySiteContent();
   initScrollReveal();
   initNavScroll();
+  initRightNow();
   bindEvents();
   syncOwnerUI();
   handleOwnerHash();
@@ -1018,23 +1032,213 @@ async function uploadPreparedFile(file, photoId) {
   return data.filePath;
 }
 
-function renderHero() {
-  const cover = state.photos.find(photo => photo.starred && photo.cloudinaryId)
-    || state.photos.find(photo => photo.cloudinaryId);
-  const el = document.getElementById("heroCoverImg");
-  if (!el) return;
-
-  if (cover) {
-    el.src = cloudinaryUrl(cover.cloudinaryId, "w_1600,q_80,f_auto");
-    el.alt = cover.title ? `Featured photograph: ${cover.title}` : "Featured photograph";
-    el.classList.remove("hidden");
-    updateSocialImage(cloudinaryUrl(cover.cloudinaryId, "w_1200,q_80,f_auto"));
-  } else {
-    el.removeAttribute("src");
-    el.alt = "Featured photograph";
-    el.classList.add("hidden");
-    updateSocialImage(defaultSocialImageUrl());
+function pickHeroPhoto() {
+  const withImage = state.photos.filter(photo => photo.cloudinaryId);
+  if (!withImage.length) return null;
+  // Keep the same frame for this page load so owner edits/refreshes don't reshuffle it,
+  // but a fresh visit (new load) gets a different one.
+  if (state.heroPhotoId) {
+    const current = withImage.find(photo => photo.id === state.heroPhotoId);
+    if (current) return current;
   }
+  const starred = withImage.filter(photo => photo.starred);
+  const pool = starred.length ? starred : withImage;
+  const choice = pool[Math.floor(Math.random() * pool.length)];
+  state.heroPhotoId = choice.id;
+  return choice;
+}
+
+function renderHero() {
+  const figure = document.getElementById("heroFigure");
+  const img = document.getElementById("heroCoverImg");
+  const caption = document.getElementById("heroCaption");
+  const capTitle = document.getElementById("heroCaptionTitle");
+  const capLoc = document.getElementById("heroCaptionLoc");
+  if (!figure || !img) return;
+
+  const cover = pickHeroPhoto();
+
+  if (!cover) {
+    figure.classList.add("hidden");
+    figure.classList.remove("is-loaded");
+    img.removeAttribute("src");
+    if (caption) caption.setAttribute("hidden", "");
+    updateSocialImage(defaultSocialImageUrl());
+    return;
+  }
+
+  const title = cover.title || titleize(cover.cloudinaryId) || "Untitled";
+  figure.classList.remove("hidden", "is-loaded");
+  img.onload = () => figure.classList.add("is-loaded");
+  img.onerror = () => figure.classList.add("is-loaded");
+  img.src = cloudinaryUrl(cover.cloudinaryId, "w_1800,q_80,f_auto");
+  img.alt = cover.title ? `Featured photograph: ${cover.title}` : "Featured photograph";
+
+  if (caption) {
+    if (capTitle) capTitle.textContent = title;
+    if (capLoc) {
+      capLoc.textContent = cover.location || "";
+      capLoc.style.display = cover.location ? "" : "none";
+    }
+    caption.removeAttribute("hidden");
+  }
+
+  // Reveal immediately if the image is already cached/complete.
+  if (img.complete && img.naturalWidth) figure.classList.add("is-loaded");
+
+  updateSocialImage(cloudinaryUrl(cover.cloudinaryId, "w_1200,q_80,f_auto"));
+}
+
+function renderContactBackdrop() {
+  const bg = document.getElementById("contactBg");
+  const section = document.getElementById("contact");
+  if (!bg || !section) return;
+
+  const withImage = state.photos.filter(photo => photo.cloudinaryId);
+  if (!withImage.length) return;
+
+  const starred = withImage.filter(photo => photo.starred);
+  const pool = starred.length ? starred : withImage;
+
+  // Reuse the same backdrop for this page load.
+  let choice = state.contactPhotoId && pool.find(photo => photo.id === state.contactPhotoId);
+  if (!choice) {
+    // Prefer a different frame than the hero so the page doesn't repeat itself.
+    const others = pool.filter(photo => photo.id !== state.heroPhotoId);
+    const finalPool = others.length ? others : pool;
+    choice = finalPool[Math.floor(Math.random() * finalPool.length)];
+    state.contactPhotoId = choice.id;
+  }
+
+  const url = cloudinaryUrl(choice.cloudinaryId, "w_1800,q_70,f_auto");
+  const pre = new Image();
+  pre.onload = () => {
+    bg.style.backgroundImage = `url("${url}")`;
+    section.classList.add("is-loaded");
+  };
+  pre.onerror = () => section.classList.add("is-loaded");
+  pre.src = url;
+}
+
+function renderAboutPhoto() {
+  const fig = document.getElementById("aboutFigure");
+  const img = document.getElementById("aboutPhoto");
+  const cap = document.getElementById("aboutPhotoTitle");
+  if (!fig || !img) return;
+
+  const withImage = state.photos.filter(photo => photo.cloudinaryId);
+  if (!withImage.length) { fig.setAttribute("hidden", ""); return; }
+
+  const starred = withImage.filter(photo => photo.starred);
+  const pool = starred.length ? starred : withImage;
+
+  let choice = state.aboutPhotoId && pool.find(photo => photo.id === state.aboutPhotoId);
+  if (!choice) {
+    // Prefer a frame not already used by the hero or contact backdrop.
+    const used = new Set([state.heroPhotoId, state.contactPhotoId]);
+    const others = pool.filter(photo => !used.has(photo.id));
+    const finalPool = others.length ? others : pool;
+    choice = finalPool[Math.floor(Math.random() * finalPool.length)];
+    state.aboutPhotoId = choice.id;
+  }
+
+  img.src = cloudinaryUrl(choice.cloudinaryId, "w_900,q_80,f_auto");
+  img.alt = choice.title ? `Photograph: ${choice.title}` : "Photograph from the archive";
+  if (cap) cap.textContent = choice.title || titleize(choice.cloudinaryId) || "Untitled";
+  fig.removeAttribute("hidden");
+}
+
+/* ---- Live "right now": place, weather, local time ---- */
+function initRightNow() {
+  const placeEl = document.getElementById("heroNowPlace");
+  if (placeEl && PLACE.label) placeEl.textContent = PLACE.label;
+
+  // Clicking the featured photo opens it full-size.
+  const figure = document.getElementById("heroFigure");
+  if (figure && !figure.dataset.bound) {
+    figure.dataset.bound = "1";
+    figure.addEventListener("click", () => {
+      if (state.heroPhotoId) openDetail(state.heroPhotoId);
+    });
+  }
+
+  startHeroClock();
+  loadHeroWeather();
+}
+
+function startHeroClock() {
+  const el = document.getElementById("heroClock");
+  if (!el) return;
+  const tick = () => {
+    try {
+      el.textContent = new Intl.DateTimeFormat("en-US", {
+        timeZone: PLACE.timezone,
+        hour: "numeric",
+        minute: "2-digit"
+      }).format(new Date()).toLowerCase();
+    } catch (_) {
+      el.textContent = "";
+    }
+  };
+  tick();
+  setInterval(tick, 30000);
+}
+
+async function loadHeroWeather() {
+  const wrap = document.getElementById("heroWeather");
+  const text = document.getElementById("heroWeatherText");
+  const icon = document.getElementById("heroWeatherIcon");
+  const sep  = document.getElementById("heroNowSep");
+  if (!wrap || !text) return;
+  try {
+    const url = "https://api.open-meteo.com/v1/forecast"
+      + `?latitude=${PLACE.lat}&longitude=${PLACE.lon}`
+      + "&current=temperature_2m,weather_code"
+      + `&temperature_unit=${PLACE.unit}`
+      + `&timezone=${encodeURIComponent(PLACE.timezone)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`weather HTTP ${res.status}`);
+    const data = await res.json();
+    const current = data && data.current;
+    if (!current || current.temperature_2m == null) throw new Error("no weather data");
+    const temp = Math.round(current.temperature_2m);
+    const info = weatherFromCode(current.weather_code);
+    text.textContent = `${temp}° ${info.label}`.trim();
+    if (icon) icon.innerHTML = info.icon;
+    wrap.removeAttribute("hidden");
+    if (sep) sep.removeAttribute("hidden");
+  } catch (err) {
+    // Weather is a nice-to-have; the clock still shows. Fail quietly.
+    console.warn("Weather unavailable:", err.message || err);
+  }
+}
+
+// Map Open-Meteo WMO weather codes to a short label + a small inline icon.
+function weatherFromCode(code) {
+  const I = {
+    sun:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>',
+    cloud:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h9.5a3.5 3.5 0 0 0 .4-6.98 5 5 0 0 0-9.65-1.2A4 4 0 0 0 7 18z"/></svg>',
+    partly: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="3"/><path d="M8 2.5v1.4M3.4 8H2M13.6 3.4l-1 1M3.4 3.4l1 1"/><path d="M9 18h7.5a3.3 3.3 0 0 0 .3-6.6 4.6 4.6 0 0 0-8.7-1A3.6 3.6 0 0 0 9 18z"/></svg>',
+    fog:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 8h18M5 12h14M3 16h18M6 20h12"/></svg>',
+    rain:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 15h9.5a3.5 3.5 0 0 0 .4-6.98 5 5 0 0 0-9.65-1.2A4 4 0 0 0 7 15z"/><path d="M8 18.5l-1 2M12 18.5l-1 2M16 18.5l-1 2"/></svg>',
+    snow:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 15h9.5a3.5 3.5 0 0 0 .4-6.98 5 5 0 0 0-9.65-1.2A4 4 0 0 0 7 15z"/><path d="M9 19h.01M12 20.5h.01M15 19h.01"/></svg>',
+    storm:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 14h9.5a3.5 3.5 0 0 0 .4-6.98 5 5 0 0 0-9.65-1.2A4 4 0 0 0 7 14z"/><path d="M12 14l-2 3.5h3L11 21"/></svg>'
+  };
+  const map = {
+    0:["clear",I.sun], 1:["mainly clear",I.sun],
+    2:["partly cloudy",I.partly], 3:["overcast",I.cloud],
+    45:["fog",I.fog], 48:["fog",I.fog],
+    51:["drizzle",I.rain], 53:["drizzle",I.rain], 55:["drizzle",I.rain],
+    56:["freezing drizzle",I.rain], 57:["freezing drizzle",I.rain],
+    61:["light rain",I.rain], 63:["rain",I.rain], 65:["heavy rain",I.rain],
+    66:["freezing rain",I.rain], 67:["freezing rain",I.rain],
+    71:["light snow",I.snow], 73:["snow",I.snow], 75:["heavy snow",I.snow], 77:["snow grains",I.snow],
+    80:["showers",I.rain], 81:["showers",I.rain], 82:["heavy showers",I.rain],
+    85:["snow showers",I.snow], 86:["snow showers",I.snow],
+    95:["thunderstorm",I.storm], 96:["thunderstorm",I.storm], 99:["thunderstorm",I.storm]
+  };
+  const entry = map[code] || ["", I.cloud];
+  return { label: entry[0], icon: entry[1] };
 }
 
 async function refresh() {
@@ -1055,6 +1259,8 @@ async function refresh() {
   }
 
   renderHero();
+  renderContactBackdrop();
+  renderAboutPhoto();
   renderStats();
   renderSeries();
   renderNavAlbums();

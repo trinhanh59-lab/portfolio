@@ -1,30 +1,55 @@
 name: Supabase keep-alive
 
+# Supabase free projects pause after ~7 days of inactivity. We ping the REST API daily.
+#
+# Why DAILY (not every few days)? GitHub's scheduled runs are "best effort" — they can be
+# delayed or skipped entirely under load. A daily ping keeps a comfortable margin even if a
+# few runs are missed.
+#
+# TWO THINGS THIS CANNOT DO — read these:
+#   1. A read-only ping CANNOT un-pause an already-paused project. If this job starts failing,
+#      the project is already paused: restore it once in the Supabase dashboard and it will
+#      pass again.
+#   2. GitHub auto-DISABLES scheduled workflows after 60 days with no commits to the repo.
+#      If you don't touch this repo for two months, this keep-alive silently stops.
+#
+# For a bulletproof backstop that never auto-disables, ALSO add a free external pinger
+# (e.g. https://cron-job.org) hitting this exact URL every 3 days with the two headers below:
+#   GET https://beanpxolozlggbwdoqjl.supabase.co/rest/v1/photos?limit=1&select=id
+#   apikey: <anon key>      Authorization: Bearer <anon key>
+
 on:
   schedule:
-    - cron: '0 13 */3 * *'
+    - cron: '0 13 * * *'   # 13:00 UTC, every day
   workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     steps:
       - name: Ping Supabase REST API
         env:
           SUPABASE_URL: https://beanpxolozlggbwdoqjl.supabase.co
           SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlYW5weG9sb3psZ2did2RvcWpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3Mjk5ODgsImV4cCI6MjA5MDMwNTk4OH0.isvxqR-lIk8nchcGdBBXq9OQ2COIyr4AnDO6hOxzLHc
         run: |
-          set -e
+          set -euo pipefail
           echo "Pinging $SUPABASE_URL at $(date -u)"
-          STATUS=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+          STATUS=$(curl -sS \
+            --retry 5 --retry-all-errors --retry-delay 10 --max-time 30 \
+            -o /tmp/resp.json -w "%{http_code}" \
             -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
-            "$SUPABASE_URL/rest/v1/photos?limit=1&select=id")
+            "$SUPABASE_URL/rest/v1/photos?limit=1&select=id") || true
           echo "HTTP $STATUS"
-          if [ "$STATUS" != "200" ]; then
-            echo "Unexpected status — response body:"
-            cat /tmp/resp.json
-            exit 1
+          if [ "$STATUS" = "200" ]; then
+            echo "✓ Supabase is alive."
+            exit 0
           fi
-          echo "Supabase is alive."
+          echo "✗ Unexpected status: $STATUS — the project is likely PAUSED."
+          echo "Response body:"
+          cat /tmp/resp.json 2>/dev/null || echo "(no response body)"
+          echo ""
+          echo "A read-only ping cannot wake a paused project."
+          echo "→ Open the Supabase dashboard, restore the project, and this job will pass again."
+          exit 1

@@ -63,6 +63,18 @@
   <main id="mainContent">
     <section class="hero" id="top">
       <div class="hero-left">
+        <div class="hero-now" id="heroNow" aria-label="Where I am right now">
+          <span class="hero-now-place" id="heroNowPlace">San Francisco Bay Area</span>
+          <span class="hero-now-live">
+            <span class="hero-now-wx" id="heroWeather" hidden>
+              <span class="hero-now-wx-icon" id="heroWeatherIcon" aria-hidden="true"></span>
+              <span id="heroWeatherText"></span>
+            </span>
+            <span class="hero-now-sep" id="heroNowSep" aria-hidden="true" hidden>·</span>
+            <time class="hero-now-time" id="heroClock"></time>
+          </span>
+        </div>
+
         <div class="hero-left-body">
           <p class="hero-eyebrow" id="heroEyebrow">Field notebook · Vol. III · MMXXVI</p>
           <h1 class="hero-title" id="heroTitle">Photographs<br>made with <em>quiet intention.</em></h1>
@@ -95,7 +107,16 @@
       </div>
 
       <div class="hero-right">
-        <img class="hero-photo hidden" id="heroCoverImg" alt="Front page photograph" fetchpriority="high" />
+        <span class="hero-nav-scrim" aria-hidden="true"></span>
+        <button class="hero-figure hidden" id="heroFigure" type="button" aria-label="View the featured photograph">
+          <img class="hero-photo" id="heroCoverImg" alt="Featured photograph" fetchpriority="high" />
+          <span class="hero-figure-veil" aria-hidden="true"></span>
+          <span class="hero-caption" id="heroCaption" hidden>
+            <span class="hero-caption-mark" aria-hidden="true">Featured · new each visit</span>
+            <span class="hero-caption-title" id="heroCaptionTitle"></span>
+            <span class="hero-caption-loc" id="heroCaptionLoc"></span>
+          </span>
+        </button>
       </div>
     </section>
 
@@ -170,6 +191,10 @@
       <div class="about-grid">
         <div class="reveal">
           <h2 class="section-display" id="aboutHeadline">Based in the<br>San Francisco Bay Area.</h2>
+          <figure class="about-figure" id="aboutFigure" hidden>
+            <img id="aboutPhoto" alt="" loading="lazy" />
+            <figcaption class="about-figure-cap"><span id="aboutPhotoTitle"></span></figcaption>
+          </figure>
         </div>
         <div class="reveal" style="transition-delay:0.1s;">
           <p class="about-tagline" id="aboutTagline">Light, place, and the quiet in-between.</p>
@@ -209,7 +234,9 @@
       </div>
     </section>
 
-    <section class="section" id="contact">
+    <section class="section section-contact" id="contact">
+      <div class="contact-bg" id="contactBg" aria-hidden="true"></div>
+      <div class="contact-veil" aria-hidden="true"></div>
       <div class="contact-inner">
         <div class="section-rule reveal">
           <span class="rule-num">05</span>
