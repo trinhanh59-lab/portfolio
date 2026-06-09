@@ -1,19 +1,19 @@
 const SITE = {
   name: "Anh Trinh",
   pageTitle: "Anh Trinh | Photography",
-  metaDescription: "A working notebook of photographs by Anh Trinh — light, place, and the quiet in-between, from the San Francisco Bay Area.",
-  eyebrow: "Field notebook · Vol. III · MMXXVI",
-  heroTitle: "Photographs<br>made with <em>quiet intention.</em>",
-  heroText: "A running body of work — light, place, and the long quiet between the worth-keeping frames. Made here in the Bay Area, mostly on foot.",
+  metaDescription: "Street and travel photographs by Anh Trinh: Vietnam, Japan, New York, and the San Francisco Bay Area.",
+  eyebrow: "Street & travel photographs",
+  heroTitle: "Vietnam, Japan,<br>New York, <em>and home.</em>",
+  heroText: "A small, growing archive of photographs grouped by place instead of date. Start with the collections.",
   aboutHeadline: "Based in the<br>San Francisco Bay Area.",
-  aboutTagline: "Light, place, and the quiet in-between.",
-  aboutText: "I'm Anh — I keep a camera close and a list of places I want to revisit on better light. This site is less a portfolio and more a working notebook: photographs I keep returning to, grouped into small collections instead of dumped chronologically. Some are five minutes from home, others a slow drive up the coast. If something here lingers with you, that's the whole point.",
-  contactDisplay: "If something here<br><em>lingered</em>, say so.",
-  contactSub: "No pitch, no list — just a note if a photograph stayed with you, or you want to trade favourite places to walk in the Bay.",
+  aboutTagline: "Mostly cities, mostly on foot.",
+  aboutText: "I'm Anh. I photograph the places I pass through. Lately that means Vietnam, Japan, New York, Houston, and the Bay Area, where I live. I carry a Fujifilm X100VI when I plan to shoot and a phone when I don't. The keepers end up here, grouped by place.",
+  contactDisplay: "If one of these<br>belongs on your wall, <em>say so.</em>",
+  contactSub: "Prints and licensing start with an email. So does telling me which one stayed with you.",
   location: "San Francisco Bay Area",
   email: "Trinhanh59@gmail.com",
-  instagramUrl: "https://instagram.com/",
-  siteUrl: ""
+  instagramUrl: "",
+  siteUrl: "https://anhphotography.netlify.app"
 };
 
 // Live "right now" strip in the hero. Weather is from Open-Meteo (no API key needed).
@@ -26,10 +26,11 @@ const PLACE = {
   unit:     "fahrenheit"
 };
 
-const OWNER_PASSWORD = "1077";
+// Owner auth and all writes go through Netlify functions (/api/*).
+// No passwords or private keys live in this file. See netlify/functions/.
+const API_BASE = "/api";
 
 const IMAGEKIT_ID          = "sphopalr1";
-const IMAGEKIT_PRIVATE_KEY = "private_KIgASXqBKJ+ttIq8bXAjpNbcWxI=";
 const IMAGEKIT_UPLOAD_URL  = "https://upload.imagekit.io/api/v1/files/upload";
 const IMAGEKIT_BASE_URL    = `https://ik.imagekit.io/${IMAGEKIT_ID}`;
 
@@ -48,8 +49,20 @@ const OWNER_LIBS = {
   heic:  "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"
 };
 
+function storedOwnerToken() {
+  const token = sessionStorage.getItem("ownerToken") || "";
+  if (!token.includes(".")) return "";
+  const expiry = Number(token.split(".")[0]);
+  if (!Number.isFinite(expiry) || expiry < Date.now()) {
+    sessionStorage.removeItem("ownerToken");
+    return "";
+  }
+  return token;
+}
+
 const state = {
-  ownerMode:       sessionStorage.getItem("ownerMode") === "1",
+  ownerToken:      storedOwnerToken(),
+  get ownerMode() { return Boolean(this.ownerToken); },
   photos:          [],
   albums:          [],
   albumGroups:     [],
@@ -106,7 +119,7 @@ function applySiteContent() {
   setText("aboutText", SITE.aboutText);
   setHTML("contactDisplay", SITE.contactDisplay);
   setText("contactSub", SITE.contactSub);
-  setText("footerSecretTrigger", `© ${SITE.name} · ${SITE.location} · MMXXVI`);
+  setText("footerSecretTrigger", `© ${SITE.name} · ${SITE.location} · ${new Date().getFullYear()}`);
 
   const mailto = `mailto:${SITE.email}`;
   setAttr("contactEmailBtn", "href", mailto);
@@ -498,13 +511,29 @@ function syncOwnerUI() {
 async function handleLogin(e) {
   e.preventDefault();
   const pw = String(new FormData(e.target).get("pw") || "");
-  if (pw !== OWNER_PASSWORD) {
-    document.getElementById("loginErr").textContent = "Incorrect password.";
+  const errEl = document.getElementById("loginErr");
+  errEl.textContent = "";
+
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/verify-owner`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw })
+    });
+  } catch {
+    errEl.textContent = "Could not reach the server. Try again.";
     return;
   }
 
-  state.ownerMode = true;
-  sessionStorage.setItem("ownerMode", "1");
+  if (!res.ok) {
+    errEl.textContent = res.status === 401 ? "Incorrect password." : "Sign-in failed. Try again.";
+    return;
+  }
+
+  const data = await res.json();
+  state.ownerToken = data.token || "";
+  sessionStorage.setItem("ownerToken", state.ownerToken);
   e.target.reset();
   document.getElementById("loginErr").textContent = "";
   closeOverlay("loginOverlay");
@@ -515,8 +544,8 @@ async function handleLogin(e) {
 }
 
 function signOut() {
-  state.ownerMode = false;
-  sessionStorage.removeItem("ownerMode");
+  state.ownerToken = "";
+  sessionStorage.removeItem("ownerToken");
   syncOwnerUI();
   closeReview();
   closeOverlay("detailOverlay");
@@ -1012,21 +1041,42 @@ function closeReview() {
   closeOverlay("reviewOverlay");
 }
 
+function handleSessionExpired() {
+  setStatus("Session expired. Sign in again.");
+  signOut();
+}
+
+async function authedFetch(path, init = {}) {
+  if (!state.ownerToken) throw new Error("Not signed in.");
+  const headers = { ...(init.headers || {}), "Authorization": `Bearer ${state.ownerToken}` };
+  const res = await fetch(`${API_BASE}/${path}`, { ...init, headers });
+  if (res.status === 401) {
+    handleSessionExpired();
+    throw new Error("Session expired.");
+  }
+  return res;
+}
+
 async function uploadPreparedFile(file, photoId) {
   if (!file) throw new Error("Missing file for upload.");
+
+  // Fresh one-time signature per upload; the private key never leaves the server.
+  const authRes = await authedFetch("imagekit-auth");
+  if (!authRes.ok) throw new Error(`Upload auth failed (HTTP ${authRes.status})`);
+  const sig = await authRes.json();
+
   const ikName = `${photoId}.jpg`;
   const form = new FormData();
   form.append("file", file);
   form.append("fileName", ikName);
   form.append("useUniqueFileName", "false");
   form.append("folder", "/portfolio");
+  form.append("publicKey", sig.publicKey);
+  form.append("signature", sig.signature);
+  form.append("expire", String(sig.expire));
+  form.append("token", sig.token);
 
-  const auth = btoa(IMAGEKIT_PRIVATE_KEY + ":");
-  const res = await fetch(IMAGEKIT_UPLOAD_URL, {
-    method: "POST",
-    headers: { "Authorization": `Basic ${auth}` },
-    body: form
-  });
+  const res = await fetch(IMAGEKIT_UPLOAD_URL, { method: "POST", body: form });
   const data = await res.json();
   if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
   return data.filePath;
@@ -1298,9 +1348,10 @@ function filtered() {
 }
 
 function renderStats() {
-  document.getElementById("statPhotos").textContent = state.photos.length;
-  document.getElementById("statAlbums").textContent = state.albumGroups.length;
-  document.getElementById("statFeatured").textContent = state.photos.filter(photo => photo.starred).length;
+  // Stats row was removed from the hero; keep null-safe in case it returns.
+  setText("statPhotos", state.photos.length);
+  setText("statAlbums", state.albumGroups.length);
+  setText("statFeatured", state.photos.filter(photo => photo.starred).length);
 }
 
 function buildAlbumGroups(photos, albums) {
@@ -2084,42 +2135,29 @@ async function sbGetAll() {
   return (await res.json()).map(fromRow);
 }
 
-async function sbUpsert(photo) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}`, {
+async function dbWrite(payload, label) {
+  const res = await authedFetch("db-write", {
     method: "POST",
-    headers: { ...SB_HDR, "Prefer": "resolution=merge-duplicates" },
-    body: JSON.stringify(toRow(photo))
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
   });
   if (!res.ok) {
     const message = await res.text();
-    console.error("Supabase upsert failed", message);
+    console.error(`${label} failed`, message);
     throw new Error(message);
   }
+}
+
+async function sbUpsert(photo) {
+  await dbWrite({ table: "photos", op: "upsert", row: toRow(photo) }, "Photo save");
 }
 
 async function sbDelete(id) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}?id=eq.${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers: SB_HDR
-  });
-  if (!res.ok) {
-    const message = await res.text();
-    console.error("Supabase delete failed", message);
-    throw new Error(message);
-  }
+  await dbWrite({ table: "photos", op: "delete", filterValue: String(id) }, "Photo delete");
 }
 
 async function sbToggleStar(id, starred) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}?id=eq.${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { ...SB_HDR, "Prefer": "return=minimal" },
-    body: JSON.stringify({ starred })
-  });
-  if (!res.ok) {
-    const message = await res.text();
-    console.error("Star update failed", message);
-    throw new Error(message);
-  }
+  await dbWrite({ table: "photos", op: "patch", filterValue: String(id), row: { starred } }, "Star update");
 }
 
 function fromAlbumRow(row) {
@@ -2151,26 +2189,9 @@ async function sbAlbumsGetAll() {
 }
 
 async function sbAlbumUpsert(album) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_ALBUMS_TABLE}`, {
-    method: "POST",
-    headers: { ...SB_HDR, "Prefer": "resolution=merge-duplicates" },
-    body: JSON.stringify(toAlbumRow(album))
-  });
-  if (!res.ok) {
-    const message = await res.text();
-    console.error("Album upsert failed", message);
-    throw new Error(message);
-  }
+  await dbWrite({ table: "albums", op: "upsert", row: toAlbumRow(album) }, "Album save");
 }
 
 async function sbAlbumDelete(name) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_ALBUMS_TABLE}?name=eq.${encodeURIComponent(name)}`, {
-    method: "DELETE",
-    headers: SB_HDR
-  });
-  if (!res.ok) {
-    const message = await res.text();
-    console.error("Album delete failed", message);
-    throw new Error(message);
-  }
+  await dbWrite({ table: "albums", op: "delete", filterValue: String(name) }, "Album delete");
 }
