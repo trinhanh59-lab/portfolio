@@ -11,12 +11,15 @@
   [headers.values]
     Cache-Control = "no-cache, must-revalidate"
 
+# app.js rewrites the page text on load, so a stale cached copy makes the
+# whole site look undeployed. These files are small and Netlify serves 304s
+# via ETag, so always revalidating costs one tiny request per visit.
 [[headers]]
   for = "/*.css"
   [headers.values]
-    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"
+    Cache-Control = "public, max-age=0, must-revalidate"
 
 [[headers]]
   for = "/*.js"
   [headers.values]
-    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"
+    Cache-Control = "public, max-age=0, must-revalidate"
