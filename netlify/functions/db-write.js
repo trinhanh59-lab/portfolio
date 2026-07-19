@@ -95,6 +95,18 @@ exports.handler = async (event) => {
   let url = `${supabaseUrl}/rest/v1/${table}`;
   let init;
 
+  // Owner-only full read. The anon key can no longer see private columns
+  // (coordinates), so owner mode fetches complete rows through this path.
+  if (op === "select") {
+    const order = table === "photos" ? "order_timestamp.desc" : "sort_order.asc,name.asc";
+    const readRes = await fetch(`${url}?select=*&order=${order}`, { headers });
+    const readText = await readRes.text();
+    if (!readRes.ok) {
+      return { statusCode: readRes.status, body: readText || "Database error" };
+    }
+    return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: readText || "[]" };
+  }
+
   if (op === "upsert") {
     if (!row || typeof row !== "object") return { statusCode: 400, body: "Missing row" };
     init = {

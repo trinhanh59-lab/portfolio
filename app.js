@@ -597,9 +597,9 @@ async function handleLogin(e) {
   document.getElementById("loginErr").textContent = "";
   closeOverlay("loginOverlay");
   syncOwnerUI();
-  renderSeries();
-  renderProjectIntro();
-  renderGallery();
+  // Re-fetch through the authenticated path so owner-only fields
+  // (coordinates) are present before any edit is opened.
+  await refresh();
 }
 
 function signOut() {
@@ -1409,7 +1409,10 @@ function weatherFromCode(code) {
 
 async function refresh() {
   try {
-    [state.photos, state.albums] = await Promise.all([sbGetAll(), sbAlbumsGetAll()]);
+    [state.photos, state.albums] = await Promise.all([
+      state.ownerMode ? sbGetAllOwner() : sbGetAll(),
+      sbAlbumsGetAll()
+    ]);
     state.loadFailed = false;
   } catch (err) {
     console.error("Could not load portfolio data", err);
@@ -2234,7 +2237,7 @@ function cloudinaryUrl(filePath, transforms) {
 }
 
 function toRow(photo) {
-  return {
+  const row = {
     id: photo.id,
     cloudinary_id: photo.cloudinaryId || null,
     title: photo.title || "",
@@ -2242,7 +2245,6 @@ function toRow(photo) {
     series: photo.series || "",
     date_taken: photo.dateTaken || "",
     location: photo.location || "",
-    coordinates: photo.coordinates || "",
     camera: photo.camera || "",
     lens: photo.lens || "",
     aperture: photo.aperture || "",
@@ -2253,6 +2255,10 @@ function toRow(photo) {
     order_timestamp: photo.orderTimestamp || Date.now(),
     starred: photo.starred || false
   };
+  // Only write coordinates when we actually hold a value; an upsert that
+  // omits the column leaves whatever is stored untouched.
+  if (typeof photo.coordinates === "string") row.coordinates = photo.coordinates;
+  return row;
 }
 
 function fromRow(row) {
@@ -2277,12 +2283,28 @@ function fromRow(row) {
   };
 }
 
+// Everything except `coordinates`, which is owner-only. Must stay in sync
+// with the column grant in the database: anon can only SELECT these.
+const SB_PUBLIC_COLS = "id,cloudinary_id,title,description,series,date_taken,location,camera,lens,aperture,shutter_speed,iso,focal_length,uploaded_at,order_timestamp,starred";
+
 async function sbGetAll() {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}?select=*&order=order_timestamp.desc`, { headers: SB_HDR });
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}?select=${SB_PUBLIC_COLS}&order=order_timestamp.desc`, { headers: SB_HDR });
   if (!res.ok) {
     console.error("Supabase fetch failed", await res.text());
     throw new Error(`Photos fetch failed (HTTP ${res.status})`);
   }
+  return (await res.json()).map(fromRow);
+}
+
+// Owner mode needs the private columns too; those come through the
+// session-authenticated function, never the anon key.
+async function sbGetAllOwner() {
+  const res = await authedFetch("db-write", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ table: "photos", op: "select" })
+  });
+  if (!res.ok) throw new Error(`Photos fetch failed (HTTP ${res.status})`);
   return (await res.json()).map(fromRow);
 }
 
