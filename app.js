@@ -79,6 +79,7 @@ const state = {
   pendingDeleteId: null,
   editingAlbum:    null,
   uploading:       false,
+  loadFailed:      false,
   secretTapCount:  0,
   secretTapTimer:  null
 };
@@ -184,17 +185,21 @@ function setAttr(id, attr, value) {
   if (el) el.setAttribute(attr, value);
 }
 
+let revealObserver = null;
+
 function initScrollReveal() {
-  const io = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (!entry.isIntersecting) return;
-      entry.target.classList.add("visible");
-      io.unobserve(entry.target);
-    });
-  }, { threshold: 0.08, rootMargin: "0px 0px -40px 0px" });
+  if (!revealObserver) {
+    revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add("visible");
+        revealObserver.unobserve(entry.target);
+      });
+    }, { threshold: 0.08, rootMargin: "0px 0px -40px 0px" });
+  }
 
   document.querySelectorAll(".reveal, .reveal-fast, .stagger").forEach(el => {
-    if (!el.classList.contains("visible")) io.observe(el);
+    if (!el.classList.contains("visible")) revealObserver.observe(el);
   });
 }
 
@@ -249,10 +254,17 @@ function bindEvents() {
     }
   });
 
+  let searchTimer = null;
   document.getElementById("searchInput").addEventListener("input", e => {
-    state.searchQ = e.target.value.trim().toLowerCase();
-    renderFilters();
-    renderGallery();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      // Read the field at fire time: a filter click may have cleared it since.
+      const q = e.target.value.trim().toLowerCase();
+      if (q === state.searchQ) return;
+      state.searchQ = q;
+      renderFilters();
+      renderGallery();
+    }, 150);
   });
 
   document.getElementById("sortSel").addEventListener("change", e => {
@@ -263,6 +275,11 @@ function bindEvents() {
     renderProjectIntro();
     renderGallery();
   });
+
+  // A drop that misses a drop zone would otherwise navigate the whole page
+  // to the dropped file, losing the site (and any in-progress review).
+  window.addEventListener("dragover", e => e.preventDefault());
+  window.addEventListener("drop", e => e.preventDefault());
 
   const dz = document.getElementById("dropZone");
   dz.addEventListener("dragover", e => {
@@ -300,6 +317,30 @@ function bindEvents() {
   document.getElementById("newAlbumBtn").addEventListener("click", () => openAlbumEditor(null));
   document.getElementById("albumForm").addEventListener("submit", saveAlbum);
   document.getElementById("albumDeleteBtn").addEventListener("click", deleteAlbum);
+
+  // The dropdown opens on hover/focus via CSS, but touch devices at desktop
+  // width get neither reliably — a tap should toggle it, and the aria state
+  // should track whichever mechanism opened it.
+  const dropdown = document.querySelector(".nav-dropdown");
+  const dropdownBtn = document.querySelector(".nav-dropdown-btn");
+  if (dropdown && dropdownBtn) {
+    const syncDropdown = open => {
+      dropdown.classList.toggle("open", open);
+      dropdownBtn.setAttribute("aria-expanded", String(open));
+    };
+    dropdownBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      syncDropdown(!dropdown.classList.contains("open"));
+    });
+    dropdown.addEventListener("mouseenter", () => dropdownBtn.setAttribute("aria-expanded", "true"));
+    dropdown.addEventListener("mouseleave", () => syncDropdown(false));
+    dropdown.addEventListener("click", e => {
+      if (e.target.closest(".nav-dropdown-item")) syncDropdown(false);
+    });
+    document.addEventListener("click", e => {
+      if (!dropdown.contains(e.target)) syncDropdown(false);
+    });
+  }
 
   document.getElementById("navToggle").addEventListener("click", () => {
     const menu = document.getElementById("mobileMenu");
@@ -341,6 +382,14 @@ function bindEvents() {
     const reset = e.target.closest("[data-reset-gallery]");
     if (reset) {
       resetGallery();
+      return;
+    }
+
+    const retry = e.target.closest("[data-retry-load]");
+    if (retry) {
+      retry.disabled = true;
+      retry.textContent = "Loading...";
+      refresh();
       return;
     }
 
@@ -531,8 +580,18 @@ async function handleLogin(e) {
     return;
   }
 
-  const data = await res.json();
-  state.ownerToken = data.token || "";
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    errEl.textContent = "Unexpected server response. Try again.";
+    return;
+  }
+  if (!data.token) {
+    errEl.textContent = "Sign-in failed. Try again.";
+    return;
+  }
+  state.ownerToken = data.token;
   sessionStorage.setItem("ownerToken", state.ownerToken);
   e.target.reset();
   document.getElementById("loginErr").textContent = "";
@@ -832,7 +891,11 @@ async function extractMeta(file) {
   const isoRaw = exif.ISO ?? exif.ISOSpeedRatings ?? exif.PhotographicSensitivity;
   const embeddedTitle = clean(exif.ObjectName || exif.Headline || exif.Title || "");
   const embeddedDesc = clean(exif.ImageDescription || exif.Description || exif["Caption-Abstract"] || exif.Caption || "");
-  const location = buildExifLocation(exif);
+  let location = buildExifLocation(exif);
+  if (!location && lat != null && lon != null) {
+    setStatus("Looking up location...");
+    location = await reverseGeocode(lat, lon);
+  }
 
   return {
     id: genId(),
@@ -850,9 +913,56 @@ async function extractMeta(file) {
     iso: isoRaw != null ? String(isoRaw) : "",
     focalLength: fmtFocal(exif.FocalLength),
     uploadedAt: new Date().toISOString(),
-    orderTimestamp: dateTaken ? new Date(dateTaken).getTime() : Date.now(),
+    orderTimestamp: dateTaken ? parseDate(dateTaken).getTime() : Date.now(),
     starred: false
   };
+}
+
+// Turn GPS coordinates into a short place name ("Da Nang, Vietnam") so photos
+// without embedded IPTC location data still get a human-readable location.
+// Both services are keyless; failure just leaves the field blank for review.
+async function reverseGeocode(lat, lon) {
+  const withTimeout = (promise, ms) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Geocode timed out")), ms))
+  ]);
+  const tidyCountry = value => str(value)
+    .replace(/\s*\(the\)$/i, "")
+    .replace(/^Viet Nam$/i, "Vietnam")
+    .replace(/^United States of America$/i, "United States");
+
+  try {
+    const url = "https://api.bigdatacloud.net/data/reverse-geocode-client"
+      + `?latitude=${lat}&longitude=${lon}&localityLanguage=en`;
+    const res = await withTimeout(fetch(url), 6000);
+    if (res.ok) {
+      const data = await res.json();
+      const city = str(data.city) || str(data.locality);
+      const region = data.countryCode === "US" ? str(data.principalSubdivision) : tidyCountry(data.countryName);
+      const name = [city, region].filter(Boolean).join(", ");
+      if (name) return name;
+    }
+  } catch (_) {
+    /* fall through to the next service */
+  }
+
+  try {
+    const url = "https://nominatim.openstreetmap.org/reverse"
+      + `?format=jsonv2&lat=${lat}&lon=${lon}&zoom=12&accept-language=en`;
+    const res = await withTimeout(fetch(url), 6000);
+    if (res.ok) {
+      const data = await res.json();
+      const addr = data.address || {};
+      const city = str(addr.city || addr.town || addr.village || addr.municipality || addr.county);
+      const region = addr.country_code === "us" ? str(addr.state) : tidyCountry(addr.country);
+      const name = [city, region].filter(Boolean).join(", ");
+      if (name) return name;
+    }
+  } catch (_) {
+    /* give up quietly; the owner can fill it in during review */
+  }
+
+  return "";
 }
 
 function buildExifLocation(exif) {
@@ -920,7 +1030,7 @@ function renderReview() {
             <div class="field"><label>Location</label><input name="location" type="text" value="${escA(draft.location)}" placeholder="City or region" /></div>
           </div>
           <div class="f-row">
-            <div class="field"><label>Camera</label><input name="camera" type="text" value="${escA(draft.camera)}" placeholder="Leica Q2" /></div>
+            <div class="field"><label>Camera</label><input name="camera" type="text" value="${escA(draft.camera)}" placeholder="Fujifilm X100VI" /></div>
             <div class="field"><label>Lens</label><input name="lens" type="text" value="${escA(draft.lens)}" placeholder="Optional" /></div>
           </div>
           <div class="f-row three">
@@ -943,18 +1053,21 @@ function renderReview() {
 
 async function saveReview() {
   const forms = Array.from(document.getElementById("reviewList").querySelectorAll(".review-form"));
-  if (!forms.length || !state.ownerMode) return;
+  if (!forms.length || !state.ownerMode || state.uploading) return;
 
   const creating = state.reviewMode === "create";
+  const saveBtn = document.getElementById("reviewSaveBtn");
   let saved = 0;
   let skipped = 0;
   const failedDrafts = [];
   const failedUrls = [];
 
   state.uploading = true;
+  saveBtn.disabled = true;
   setProgress(5);
   setStatus(creating ? "Publishing..." : "Saving changes...");
 
+  try {
   for (let i = 0; i < forms.length; i += 1) {
     const form = forms[i];
     const draft = state.reviewQueue.find(item => item.draftId === form.dataset.draftId);
@@ -967,7 +1080,7 @@ async function saveReview() {
       id: draft.id,
       cloudinaryId: draft.cloudinaryId || null,
       uploadedAt: draft.uploadedAt || new Date().toISOString(),
-      orderTimestamp: dateTaken ? new Date(dateTaken).getTime() : draft.orderTimestamp || Date.now(),
+      orderTimestamp: dateTaken ? parseDate(dateTaken).getTime() : draft.orderTimestamp || Date.now(),
       title: str(fd.get("title")) || "Untitled",
       series: str(fd.get("series")),
       description: str(fd.get("description")),
@@ -1009,9 +1122,11 @@ async function saveReview() {
 
     setProgress(5 + Math.round(((i + 1) / forms.length) * 93));
   }
-
-  state.uploading = false;
-  setProgress(100);
+  } finally {
+    state.uploading = false;
+    saveBtn.disabled = false;
+    setProgress(100);
+  }
 
   if (failedDrafts.length) {
     state.reviewQueue = failedDrafts;
@@ -1127,8 +1242,9 @@ function renderHero() {
   if (caption) {
     if (capTitle) capTitle.textContent = title;
     if (capLoc) {
-      capLoc.textContent = cover.location || "";
-      capLoc.style.display = cover.location ? "" : "none";
+      const loc = publicLocation(cover.location);
+      capLoc.textContent = loc;
+      capLoc.style.display = loc ? "" : "none";
     }
     caption.removeAttribute("hidden");
   }
@@ -1246,7 +1362,7 @@ async function loadHeroWeather() {
       + "&current=temperature_2m,weather_code"
       + `&temperature_unit=${PLACE.unit}`
       + `&timezone=${encodeURIComponent(PLACE.timezone)}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) throw new Error(`weather HTTP ${res.status}`);
     const data = await res.json();
     const current = data && data.current;
@@ -1294,10 +1410,12 @@ function weatherFromCode(code) {
 async function refresh() {
   try {
     [state.photos, state.albums] = await Promise.all([sbGetAll(), sbAlbumsGetAll()]);
+    state.loadFailed = false;
   } catch (err) {
     console.error("Could not load portfolio data", err);
     state.photos = state.photos || [];
     state.albums = state.albums || [];
+    state.loadFailed = true;
     setStatus("Could not load portfolio. Check your connection and refresh.");
   }
   sortPhotos();
@@ -1340,7 +1458,7 @@ function filtered() {
 
   if (state.searchQ) {
     const q = state.searchQ;
-    photos = photos.filter(photo => [photo.title, photo.series, photo.location, photo.description, photo.camera]
+    photos = photos.filter(photo => [photo.title, photo.series, publicLocation(photo.location), photo.description, photo.camera]
       .some(value => (value || "").toLowerCase().includes(q)));
   }
 
@@ -1578,6 +1696,17 @@ function renderGallery() {
 
   if (!photos.length) {
     const noPhotos = state.photos.length === 0;
+
+    if (noPhotos && state.loadFailed) {
+      wrap.innerHTML = `
+        <div class="empty">
+          <h3>The archive didn't load.</h3>
+          <p>Something between you and the server hiccuped. The photographs are still there.</p>
+          <div class="empty-actions"><button type="button" class="btn" data-retry-load="1">Try again</button></div>
+        </div>`;
+      return;
+    }
+
     const viewingCollection = state.activeAlbum !== "all" && state.activeAlbum !== "starred";
     const title = noPhotos
       ? "Selected work is on the way."
@@ -1602,14 +1731,14 @@ function renderGallery() {
   wrap.innerHTML = `<div class="photo-grid">${photos.map(photo => {
     const src = cloudinaryUrl(photo.cloudinaryId, "w_900,q_auto,f_auto");
     const starBadge = photo.starred ? `<div class="photo-star-badge">★</div>` : "";
-    const metaText = compact([photo.series, photo.location]);
+    const metaText = compact(uniq([photo.series, publicLocation(photo.location)]));
     return `
       <button type="button" class="photo-brick reveal-fast" data-photo-id="${escA(photo.id)}" aria-label="Open ${escA(photo.title || "photograph")}">
         <img src="${escA(src)}" alt="${escA(photo.title || "Photograph")}" loading="lazy" decoding="async" />
         ${starBadge}
         <div class="photo-brick-overlay">
           <div class="photo-brick-title">${esc(photo.title || "Untitled")}</div>
-          <div class="photo-brick-meta">${esc(metaText || photo.location || "")}</div>
+          <div class="photo-brick-meta">${esc(metaText)}</div>
         </div>
       </button>`;
   }).join("")}</div>`;
@@ -1661,11 +1790,14 @@ function renderDetail(photo) {
   const index = photos.findIndex(item => item.id === photo.id);
   const image = document.getElementById("detailImg");
 
-  document.getElementById("detailCounter").textContent = photos.length > 1 ? `${index + 1} of ${photos.length}` : "Photograph";
+  document.getElementById("detailCounter").textContent = index >= 0 && photos.length > 1 ? `${index + 1} of ${photos.length}` : "Photograph";
   document.getElementById("detailTitle").textContent = photo.title || "Untitled";
-  document.getElementById("detailDesc").textContent = photo.description || "No description added.";
+  const descEl = document.getElementById("detailDesc");
+  descEl.textContent = photo.description || "";
+  descEl.style.display = photo.description ? "" : "none";
 
   const detailSrc = cloudinaryUrl(photo.cloudinaryId, "w_2000,q_auto,f_auto");
+  image.alt = photo.title ? `Photograph: ${photo.title}` : "Photograph";
   image.style.opacity = "0";
   image.onload = () => { image.style.opacity = "1"; };
   image.onerror = () => { image.style.opacity = "1"; };
@@ -1689,7 +1821,7 @@ function renderDetail(photo) {
   const publicMeta = [
     ["Collection", photo.series || "-"],
     ["Date", fmtDisplay(photo.dateTaken) || "-"],
-    ["Location", photo.location || "-"],
+    ["Location", publicLocation(photo.location) || "-"],
     ["Camera", photo.camera || "-"]
   ];
 
@@ -1708,7 +1840,7 @@ function renderDetail(photo) {
     <div class="meta-cell"><div class="meta-k">${esc(key)}</div><div class="meta-v">${esc(value)}</div></div>`).join("");
 
   document.getElementById("prevBtn").disabled = index <= 0;
-  document.getElementById("nextBtn").disabled = index >= photos.length - 1;
+  document.getElementById("nextBtn").disabled = index < 0 || index >= photos.length - 1;
 
   if (state.ownerMode) {
     const starred = photo.starred;
@@ -1734,6 +1866,7 @@ function renderDetail(photo) {
 function navDetail(direction) {
   const photos = filtered();
   const index = photos.findIndex(photo => photo.id === state.activeId);
+  if (index === -1) return;
   const next = photos[index + direction];
   if (!next) return;
   state.activeId = next.id;
@@ -1947,7 +2080,7 @@ async function ensureAlbumExists(name, fallbackCover = "") {
 
 function photoTimestamp(photo) {
   const source = photo.dateTaken || photo.uploadedAt;
-  const time = new Date(source).getTime();
+  const time = parseDate(source).getTime();
   return Number.isFinite(time) ? time : Date.now();
 }
 
@@ -1971,6 +2104,14 @@ function prefersReducedMotion() {
 
 function compact(values) {
   return values.map(str).filter(Boolean).join(" · ");
+}
+
+// A location that is only a "lat, lon" pair is EXIF spillover, not a place
+// name. Never show it to visitors; the coordinates field already keeps it.
+const COORD_ONLY = /^-?\d{1,3}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?$/;
+function publicLocation(value) {
+  const v = str(value);
+  return COORD_ONLY.test(v) ? "" : v;
 }
 
 function uniq(values) {
@@ -2009,9 +2150,19 @@ function fmtDateInput(value) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+// Date-only strings ("2026-02-19") parse as UTC midnight, which is the
+// previous day anywhere west of UTC. Parse them as local dates instead.
+function parseDate(value) {
+  if (value instanceof Date) return value;
+  const s = str(value);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return new Date(s || NaN);
+}
+
 function fmtDisplay(value) {
   if (!value) return "";
-  const date = new Date(value);
+  const date = parseDate(value);
   if (Number.isNaN(date.getTime())) return str(value);
   return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "long", day: "numeric" }).format(date);
 }
@@ -2130,7 +2281,7 @@ async function sbGetAll() {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}?select=*&order=order_timestamp.desc`, { headers: SB_HDR });
   if (!res.ok) {
     console.error("Supabase fetch failed", await res.text());
-    return [];
+    throw new Error(`Photos fetch failed (HTTP ${res.status})`);
   }
   return (await res.json()).map(fromRow);
 }
@@ -2183,7 +2334,7 @@ async function sbAlbumsGetAll() {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_ALBUMS_TABLE}?select=*&order=sort_order.asc,name.asc`, { headers: SB_HDR });
   if (!res.ok) {
     console.error("Albums fetch failed", await res.text());
-    return [];
+    throw new Error(`Albums fetch failed (HTTP ${res.status})`);
   }
   return (await res.json()).map(fromAlbumRow);
 }

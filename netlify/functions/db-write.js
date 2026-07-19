@@ -34,6 +34,27 @@ function bearerTokenFromHeaders(headers) {
   return match ? match[1] : null;
 }
 
+// Best-effort removal of the stored image when its photo row is deleted, so
+// deleted photos don't pile up in ImageKit. Never blocks the row delete.
+async function deleteImageKitFile(filePath) {
+  const key = process.env.IMAGEKIT_PRIVATE_KEY;
+  if (!key || !filePath) return;
+  const auth = "Basic " + Buffer.from(`${key}:`).toString("base64");
+  const name = filePath.split("/").pop();
+  const search = await fetch(
+    `https://api.imagekit.io/v1/files?searchQuery=${encodeURIComponent(`name="${name}"`)}`,
+    { headers: { Authorization: auth } }
+  );
+  if (!search.ok) return;
+  const files = await search.json();
+  const match = Array.isArray(files) ? files.find(f => f.filePath === filePath) : null;
+  if (!match) return;
+  await fetch(`https://api.imagekit.io/v1/files/${match.fileId}`, {
+    method: "DELETE",
+    headers: { Authorization: auth }
+  });
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method Not Allowed" };
@@ -90,11 +111,30 @@ exports.handler = async (event) => {
       headers: { ...headers, "Prefer": "return=minimal" },
       body: JSON.stringify(row)
     };
-  } else if (op === "delete") {
+  }
+
+  let pendingImagePath = "";
+
+  if (op === "delete") {
     if (typeof filterValue !== "string" || !filterValue) return { statusCode: 400, body: "Missing filter" };
+    if (table === "photos") {
+      // Look up the stored file path before the row disappears.
+      try {
+        const lookup = await fetch(
+          `${supabaseUrl}/rest/v1/photos?id=eq.${encodeURIComponent(filterValue)}&select=cloudinary_id`,
+          { headers }
+        );
+        if (lookup.ok) {
+          const rows = await lookup.json();
+          pendingImagePath = rows[0]?.cloudinary_id || "";
+        }
+      } catch {
+        /* cleanup is best-effort */
+      }
+    }
     url += `?${tableCfg.filterKey}=eq.${encodeURIComponent(filterValue)}`;
     init = { method: "DELETE", headers };
-  } else {
+  } else if (!init) {
     return { statusCode: 400, body: "Unknown op" };
   }
 
@@ -103,5 +143,14 @@ exports.handler = async (event) => {
   if (!res.ok) {
     return { statusCode: res.status, body: text || "Database error" };
   }
+
+  if (pendingImagePath) {
+    try {
+      await deleteImageKitFile(pendingImagePath);
+    } catch (err) {
+      console.error("ImageKit cleanup failed", err);
+    }
+  }
+
   return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: text || "{}" };
 };

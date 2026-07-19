@@ -35,6 +35,8 @@ exports.handler = async (event) => {
 
   const submitted = typeof body.password === "string" ? body.password : "";
   if (!submitted || !timingSafeStringEqual(submitted, ownerPassword)) {
+    // Slow down brute-force attempts; a real owner never notices one second.
+    await new Promise(resolve => setTimeout(resolve, 1000));
     return {
       statusCode: 401,
       headers: { "Content-Type": "application/json" },
