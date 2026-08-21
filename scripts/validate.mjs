@@ -51,6 +51,13 @@ const publicColumns = app.match(/const SB_PUBLIC_COLS = "([^"]+)"/)?.[1]?.split(
 assert(!publicColumns.includes("coordinates"), "Public photo query exposes coordinates");
 assert(!publicColumns.includes("tags"), "Public photo query exposes private tags");
 assert(!app.includes("SUPABASE_SERVICE_ROLE_KEY"), "Service-role variable leaked into browser code");
+assert(app.includes("const IMAGEKIT_UPLOAD_TIMEOUT_MS = 60000"), "ImageKit upload timeout is missing");
+assert(
+  /fetchWithTimeout\(\s*IMAGEKIT_UPLOAD_URL,[\s\S]*?IMAGEKIT_UPLOAD_TIMEOUT_MS\s*\)/.test(app),
+  "ImageKit upload does not use its bounded timeout"
+);
+assert(app.includes('typeof data?.filePath !== "string"'), "ImageKit upload accepts a missing file path");
+assert(app.includes("First error: ${failureMessages[0]}"), "Upload failures lose their actionable reason");
 assert(netlifyConfig.includes('from = "/api/*"'), "Netlify API redirect is missing");
 assert(netlifyConfig.includes("X-Content-Type-Options"), "Baseline security headers are missing");
 

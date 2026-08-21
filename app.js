@@ -50,7 +50,8 @@ const OWNER_LIBS = {
 };
 
 const DATA_FETCH_TIMEOUT_MS = 12000;
-const API_FETCH_TIMEOUT_MS = 20000;
+const API_FETCH_TIMEOUT_MS = 25000;
+const IMAGEKIT_UPLOAD_TIMEOUT_MS = 60000;
 const SB_PAGE_SIZE = 1000;
 const REVEAL_FAILSAFE_MS = 2500;
 
@@ -220,11 +221,20 @@ function setAttr(id, attr, value) {
 }
 
 async function fetchWithTimeout(url, init = {}, timeoutMs = DATA_FETCH_TIMEOUT_MS) {
+  const bufferResponse = async response => {
+    const body = await response.arrayBuffer();
+    return new Response(body.byteLength ? body : null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    });
+  };
+
   if (typeof AbortController !== "function") {
     let timer;
     try {
       return await Promise.race([
-        fetch(url, init),
+        fetch(url, init).then(bufferResponse),
         new Promise((_, reject) => {
           timer = setTimeout(() => reject(new Error("Request timed out")), timeoutMs);
         })
@@ -236,7 +246,8 @@ async function fetchWithTimeout(url, init = {}, timeoutMs = DATA_FETCH_TIMEOUT_M
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    return await bufferResponse(response);
   } finally {
     clearTimeout(timer);
   }
@@ -313,13 +324,29 @@ function bindEvents() {
     closeOverlay("confirmOverlay");
     if (!id) return;
     try {
-      await sbDelete(id);
+      const outcome = await sbDelete(id);
       closeOverlay("detailOverlay");
       await refresh();
-      setStatus("Deleted.");
+      const cleanupIncomplete = outcome && !["deleted", "not_found", "not_needed"].includes(outcome.imageCleanup);
+      if (outcome?.database === "not_found") {
+        setStatus("Photo was already absent from the portfolio.");
+      } else if (cleanupIncomplete) {
+        setStatus("Deleted from the portfolio. Image storage cleanup did not finish.");
+      } else {
+        setStatus("Deleted.");
+      }
     } catch (err) {
       console.error(err);
-      setStatus(`Delete failed: ${err.message}`);
+      if (err?.deleteIndeterminate) {
+        try {
+          await refresh();
+        } catch (refreshErr) {
+          console.error("Refresh after an unconfirmed delete failed", refreshErr);
+        }
+        setStatus("Delete result was not confirmed. Check the refreshed portfolio before retrying.");
+      } else {
+        setStatus(`Delete failed: ${err.message}`);
+      }
     }
   });
 
@@ -1190,6 +1217,7 @@ async function saveReview() {
   let skipped = 0;
   const failedDrafts = [];
   const failedUrls = [];
+  const failureMessages = [];
 
   state.uploading = true;
   saveBtn.disabled = true;
@@ -1244,6 +1272,7 @@ async function saveReview() {
     } catch (err) {
       console.error(err);
       skipped += 1;
+      failureMessages.push(err.message || "The operation failed.");
       failedDrafts.push({ ...draft, ...photo, cloudinaryId: photo.cloudinaryId || draft.cloudinaryId || null });
       if (creating && draft.previewUrl.startsWith("blob:")) failedUrls.push(draft.previewUrl);
       setStatus(`${creating ? "Publish" : "Save"} failed${label}: ${err.message}`);
@@ -1263,7 +1292,13 @@ async function saveReview() {
     state.reviewMode = creating ? "create" : "edit";
     renderReview();
     openOverlay("reviewOverlay");
-    setStatus(saved > 0 ? `${saved} saved, ${skipped} still need attention.` : `Nothing saved. ${skipped} item${skipped === 1 ? "" : "s"} still need attention.`);
+    const summary = saved > 0
+      ? `${saved} saved, ${skipped} still need attention.`
+      : `Nothing saved. ${skipped} item${skipped === 1 ? "" : "s"} still need attention.`;
+    const detail = failureMessages.length
+      ? ` ${failureMessages.length === 1 ? failureMessages[0] : `First error: ${failureMessages[0]}`}`
+      : "";
+    setStatus(summary + detail);
     return;
   }
 
@@ -1293,9 +1328,9 @@ function handleSessionExpired() {
 async function authedFetch(path, init = {}) {
   if (!state.ownerToken) throw new Error("Not signed in.");
   const headers = { ...(init.headers || {}), "Authorization": `Bearer ${state.ownerToken}` };
-  // The proxy stops its own upstream requests after 15 seconds. Give it time
-  // to return that result so the browser never reports failure while a write
-  // can still finish on the server.
+  // The proxy caps its database request and any storage cleanup separately.
+  // This outer deadline stays longer than both combined so a committed write
+  // is not reported as a browser timeout.
   const res = await fetchWithTimeout(`${API_BASE}/${path}`, { ...init, headers }, API_FETCH_TIMEOUT_MS);
   if (res.status === 401) {
     handleSessionExpired();
@@ -1323,9 +1358,30 @@ async function uploadPreparedFile(file, photoId) {
   form.append("expire", String(sig.expire));
   form.append("token", sig.token);
 
-  const res = await fetch(IMAGEKIT_UPLOAD_URL, { method: "POST", body: form });
-  const data = await res.json();
+  let res;
+  try {
+    res = await fetchWithTimeout(
+      IMAGEKIT_UPLOAD_URL,
+      { method: "POST", body: form },
+      IMAGEKIT_UPLOAD_TIMEOUT_MS
+    );
+  } catch (err) {
+    if (err?.name === "AbortError" || err?.message === "Request timed out") {
+      throw new Error("Upload timed out before ImageKit confirmed it. The photo was not published; review it and retry.");
+    }
+    throw new Error(`Upload failed before ImageKit confirmed it: ${err?.message || "network error"}`);
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (_) {
+    throw new Error("ImageKit returned an invalid upload response. The photo was not published; review it and retry.");
+  }
   if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
+  if (typeof data?.filePath !== "string" || !data.filePath.trim()) {
+    throw new Error("ImageKit did not confirm the uploaded file path. The photo was not published; review it and retry.");
+  }
   return data.filePath;
 }
 
@@ -1667,6 +1723,7 @@ function buildAlbumGroups(photos, albums) {
       earliestTimestamp: 0,
       description: album.description || "",
       cover: album.coverCloudinaryId || "",
+      availableCovers: [],
       sortOrder: Number(album.sortOrder) || 0,
       hasCustomSort: Number(album.sortOrder) > 0,
       createdAt: album.createdAt || ""
@@ -1683,6 +1740,7 @@ function buildAlbumGroups(photos, albums) {
       earliestTimestamp: 0,
       description: "",
       cover: "",
+      availableCovers: [],
       sortOrder: 0,
       hasCustomSort: false,
       createdAt: ""
@@ -1697,13 +1755,20 @@ function buildAlbumGroups(photos, albums) {
     if (!existing.earliestTimestamp || ts < existing.earliestTimestamp) {
       existing.earliestTimestamp = ts;
     }
-    if (!existing.cover && photo.cloudinaryId) {
-      existing.cover = photo.cloudinaryId;
+    if (photo.cloudinaryId) {
+      existing.availableCovers.push(photo.cloudinaryId);
     }
     map.set(photo.series, existing);
   });
 
   return Array.from(map.values())
+    .map(group => {
+      if (!group.availableCovers.includes(group.cover)) {
+        group.cover = group.availableCovers[0] || "";
+      }
+      delete group.availableCovers;
+      return group;
+    })
     .filter(group => group.name && (group.count > 0 || albums.some(album => album.name === group.name)))
     .sort((a, b) => {
       if (a.hasCustomSort !== b.hasCustomSort) return a.hasCustomSort ? -1 : 1;
@@ -2515,10 +2580,19 @@ async function dbWrite(payload, label) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
+  const responseText = await res.text();
   if (!res.ok) {
-    const message = await res.text();
+    const message = responseText;
     console.error(`${label} failed`, message);
-    throw new Error(message);
+    const error = new Error(message || `HTTP ${res.status}`);
+    error.httpStatus = res.status;
+    throw error;
+  }
+  if (!responseText) return null;
+  try {
+    return JSON.parse(responseText);
+  } catch (_) {
+    return null;
   }
 }
 
@@ -2527,7 +2601,23 @@ async function sbUpsert(photo) {
 }
 
 async function sbDelete(id) {
-  await dbWrite({ table: "photos", op: "delete", filterValue: String(id) }, "Photo delete");
+  try {
+    const outcome = await dbWrite(
+      { table: "photos", op: "delete", filterValue: String(id) },
+      "Photo delete"
+    );
+    const validDatabase = ["deleted", "not_found", "completed"].includes(outcome?.database);
+    const validCleanup = typeof outcome?.imageCleanup === "string" && outcome.imageCleanup.length > 0;
+    if (!validDatabase || !validCleanup) {
+      throw new Error("The server returned an invalid delete result.");
+    }
+    return outcome;
+  } catch (err) {
+    if (err?.httpStatus || err?.message === "Session expired.") throw err;
+    const deleteError = new Error(err?.message || "The delete result could not be confirmed.");
+    deleteError.deleteIndeterminate = true;
+    throw deleteError;
+  }
 }
 
 async function sbToggleStar(id, starred) {

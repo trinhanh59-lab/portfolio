@@ -10,6 +10,7 @@ const ALLOWED = {
   albums: { filterKey: "name" }
 };
 const FETCH_TIMEOUT_MS = 15000;
+const IMAGEKIT_CLEANUP_TIMEOUT_MS = 2500;
 const READ_PAGE_SIZE = 1000;
 
 function supabaseHeaders(key) {
@@ -29,7 +30,13 @@ async function fetchWithTimeout(url, init = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const body = await response.arrayBuffer();
+    return new Response(body.byteLength ? body : null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -59,25 +66,42 @@ function bearerTokenFromHeaders(headers) {
   return match ? match[1] : null;
 }
 
-// Best-effort removal of the stored image when its photo row is deleted, so
-// deleted photos don't pile up in ImageKit. Never blocks the row delete.
+// Best-effort removal of the stored image when its photo row is deleted. The
+// two ImageKit calls share one short deadline so cleanup cannot make the
+// browser time out after the database delete has already committed.
 async function deleteImageKitFile(filePath) {
   const key = process.env.IMAGEKIT_PRIVATE_KEY;
-  if (!key || !filePath) return;
+  if (!key || !filePath) return "skipped";
   const auth = "Basic " + Buffer.from(`${key}:`).toString("base64");
   const name = filePath.split("/").pop();
-  const search = await fetchWithTimeout(
-    `https://api.imagekit.io/v1/files?searchQuery=${encodeURIComponent(`name="${name}"`)}`,
-    { headers: { Authorization: auth } }
-  );
-  if (!search.ok) return;
-  const files = await search.json();
-  const match = Array.isArray(files) ? files.find(f => f.filePath === filePath) : null;
-  if (!match) return;
-  await fetchWithTimeout(`https://api.imagekit.io/v1/files/${match.fileId}`, {
-    method: "DELETE",
-    headers: { Authorization: auth }
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), IMAGEKIT_CLEANUP_TIMEOUT_MS);
+  try {
+    const search = await fetch(
+      `https://api.imagekit.io/v1/files?searchQuery=${encodeURIComponent(`name="${name}"`)}`,
+      { headers: { Authorization: auth }, signal: controller.signal }
+    );
+    if (!search.ok) return "search_failed";
+    let files;
+    try {
+      files = await search.json();
+    } catch {
+      return "invalid_response";
+    }
+    const match = Array.isArray(files) ? files.find(f => f.filePath === filePath) : null;
+    if (!match) return "not_found";
+    const removal = await fetch(`https://api.imagekit.io/v1/files/${match.fileId}`, {
+      method: "DELETE",
+      headers: { Authorization: auth },
+      signal: controller.signal
+    });
+    return removal.ok ? "deleted" : "delete_failed";
+  } catch (err) {
+    if (controller.signal.aborted) return "timed_out";
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 exports.handler = async (event) => {
@@ -174,27 +198,17 @@ exports.handler = async (event) => {
     };
   }
 
-  let pendingImagePath = "";
+  let isPhotoDelete = false;
 
   if (op === "delete") {
     if (typeof filterValue !== "string" || !filterValue) return { statusCode: 400, body: "Missing filter" };
-    if (table === "photos") {
-      // Look up the stored file path before the row disappears.
-      try {
-        const lookup = await fetchWithTimeout(
-          `${supabaseUrl}/rest/v1/photos?id=eq.${encodeURIComponent(filterValue)}&select=cloudinary_id`,
-          { headers }
-        );
-        if (lookup.ok) {
-          const rows = await lookup.json();
-          pendingImagePath = rows[0]?.cloudinary_id || "";
-        }
-      } catch {
-        /* cleanup is best-effort */
-      }
-    }
+    isPhotoDelete = table === "photos";
     url += `?${tableCfg.filterKey}=eq.${encodeURIComponent(filterValue)}`;
-    init = { method: "DELETE", headers };
+    if (isPhotoDelete) url += "&select=cloudinary_id";
+    init = {
+      method: "DELETE",
+      headers: isPhotoDelete ? { ...headers, "Prefer": "return=representation" } : headers
+    };
   } else if (!init) {
     return { statusCode: 400, body: "Unknown op" };
   }
@@ -205,12 +219,36 @@ exports.handler = async (event) => {
     return { statusCode: res.status, body: text || "Database error" };
   }
 
-  if (pendingImagePath) {
+  if (isPhotoDelete) {
+    let deletedRows = null;
     try {
-      await deleteImageKitFile(pendingImagePath);
-    } catch (err) {
-      console.error("ImageKit cleanup failed", err);
+      deletedRows = JSON.parse(text || "[]");
+    } catch {
+      // Supabase returned success, so the delete completed even if its
+      // representation was malformed. Do not turn that commit into a 5xx.
     }
+
+    const database = Array.isArray(deletedRows)
+      ? (deletedRows.length ? "deleted" : "not_found")
+      : "completed";
+    const parsedRepresentation = Array.isArray(deletedRows);
+    const pendingImagePath = parsedRepresentation ? deletedRows[0]?.cloudinary_id || "" : "";
+    let imageCleanup = parsedRepresentation
+      ? (pendingImagePath ? "failed" : "not_needed")
+      : "unknown";
+    if (pendingImagePath) {
+      try {
+        imageCleanup = await deleteImageKitFile(pendingImagePath);
+      } catch (err) {
+        console.error("ImageKit cleanup failed", err);
+      }
+    }
+
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      body: JSON.stringify({ database, imageCleanup })
+    };
   }
 
   return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: text || "{}" };

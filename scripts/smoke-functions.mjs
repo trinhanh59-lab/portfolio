@@ -113,6 +113,81 @@ try {
   assert.equal(writeRequest.init.headers.Prefer, "resolution=merge-duplicates");
   assert.ok(!Object.hasOwn(JSON.parse(writeRequest.init.body), "coordinates"));
 
+  const deleteCalls = [];
+  globalThis.fetch = async (url, init) => {
+    deleteCalls.push({ url: String(url), init });
+    if (String(url).startsWith(`${testEnv.SUPABASE_URL}/rest/v1/photos`)) {
+      return new Response(JSON.stringify([{ cloudinary_id: "/portfolio/photo-delete.jpg" }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (String(url).includes("/v1/files?")) {
+      return new Response(JSON.stringify([{
+        fileId: "imagekit-file-1",
+        filePath: "/portfolio/photo-delete.jpg"
+      }]), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (String(url).endsWith("/v1/files/imagekit-file-1")) {
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`Unexpected delete URL: ${url}`);
+  };
+  const deleted = await dbWrite({
+    httpMethod: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ table: "photos", op: "delete", filterValue: "photo-delete" })
+  });
+  assert.equal(deleted.statusCode, 200);
+  assert.deepEqual(JSON.parse(deleted.body), { database: "deleted", imageCleanup: "deleted" });
+  assert.match(deleteCalls[0].url, /[?&]select=cloudinary_id(?:&|$)/);
+  assert.equal(deleteCalls[0].init.method, "DELETE");
+  assert.equal(deleteCalls[0].init.headers.Prefer, "return=representation");
+  assert.equal(deleteCalls[2].init.method, "DELETE");
+
+  globalThis.fetch = async url => {
+    if (String(url).startsWith(`${testEnv.SUPABASE_URL}/rest/v1/photos`)) {
+      return new Response("not-json", { status: 200, headers: { "Content-Type": "text/plain" } });
+    }
+    throw new Error(`ImageKit cleanup should not run without a parsed delete representation: ${url}`);
+  };
+  const malformedDelete = await dbWrite({
+    httpMethod: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ table: "photos", op: "delete", filterValue: "photo-malformed" })
+  });
+  assert.equal(malformedDelete.statusCode, 200);
+  assert.deepEqual(JSON.parse(malformedDelete.body), { database: "completed", imageCleanup: "unknown" });
+
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith(`${testEnv.SUPABASE_URL}/rest/v1/photos`)) {
+      return new Response(JSON.stringify([{ cloudinary_id: "/portfolio/photo-timeout.jpg" }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (String(url).includes("/v1/files?")) {
+      return new Promise((_, reject) => {
+        init.signal.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        }, { once: true });
+      });
+    }
+    throw new Error(`Unexpected timeout-test URL: ${url}`);
+  };
+  const cleanupStarted = Date.now();
+  const cleanupTimedOut = await dbWrite({
+    httpMethod: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ table: "photos", op: "delete", filterValue: "photo-timeout" })
+  });
+  const cleanupElapsed = Date.now() - cleanupStarted;
+  assert.equal(cleanupTimedOut.statusCode, 200);
+  assert.deepEqual(JSON.parse(cleanupTimedOut.body), { database: "deleted", imageCleanup: "timed_out" });
+  assert.ok(cleanupElapsed >= 2000 && cleanupElapsed < 6000, `Cleanup deadline was ${cleanupElapsed} ms`);
+
   console.log("Netlify function smoke checks passed.");
 } finally {
   globalThis.fetch = originalFetch;
