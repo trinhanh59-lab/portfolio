@@ -45,16 +45,46 @@ const SB_HDR          = {
 };
 
 const OWNER_LIBS = {
-  exifr: "https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js",
+  exifr: "https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js",
   heic:  "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"
 };
 
+const DATA_FETCH_TIMEOUT_MS = 12000;
+const API_FETCH_TIMEOUT_MS = 25000;
+const IMAGEKIT_UPLOAD_TIMEOUT_MS = 60000;
+const SB_PAGE_SIZE = 1000;
+const REVEAL_FAILSAFE_MS = 2500;
+
+function getSessionValue(key) {
+  try {
+    return sessionStorage.getItem(key) || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function setSessionValue(key, value) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch (_) {
+    // Owner mode still works for this page load when storage is blocked.
+  }
+}
+
+function removeSessionValue(key) {
+  try {
+    sessionStorage.removeItem(key);
+  } catch (_) {
+    // Nothing else to clear when storage is unavailable.
+  }
+}
+
 function storedOwnerToken() {
-  const token = sessionStorage.getItem("ownerToken") || "";
+  const token = getSessionValue("ownerToken");
   if (!token.includes(".")) return "";
   const expiry = Number(token.split(".")[0]);
   if (!Number.isFinite(expiry) || expiry < Date.now()) {
-    sessionStorage.removeItem("ownerToken");
+    removeSessionValue("ownerToken");
     return "";
   }
   return token;
@@ -85,16 +115,21 @@ const state = {
 };
 
 let ownerLibrariesPromise = null;
+let refreshGeneration = 0;
 
 const OVERLAYS = ["loginOverlay", "reviewOverlay", "detailOverlay", "confirmOverlay", "albumOverlay"];
+const overlayReturnFocus = new Map();
 const RAW_EXTENSIONS  = /\.(raf|cr2|cr3|nef|nrw|arw|srw|srf|orf|rw2|pef|dng|3fr|mef|mrw|rwl|x3f|iiq)$/i;
 const MAX_UPLOAD_MB   = 20;
 const MAX_DIMENSION   = 4800;
 const COMPRESS_THRESH = 8;
 
 document.addEventListener("DOMContentLoaded", async () => {
-  applySiteContent();
+  // Reveal effects are progressive enhancement. If this script never runs,
+  // the CSS leaves the static page visible instead of hiding it permanently.
+  document.documentElement.classList.add("reveal-enabled");
   initScrollReveal();
+  applySiteContent();
   initNavScroll();
   initRightNow();
   bindEvents();
@@ -185,9 +220,49 @@ function setAttr(id, attr, value) {
   if (el) el.setAttribute(attr, value);
 }
 
+async function fetchWithTimeout(url, init = {}, timeoutMs = DATA_FETCH_TIMEOUT_MS) {
+  const bufferResponse = async response => {
+    const body = await response.arrayBuffer();
+    return new Response(body.byteLength ? body : null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    });
+  };
+
+  if (typeof AbortController !== "function") {
+    let timer;
+    try {
+      return await Promise.race([
+        fetch(url, init).then(bufferResponse),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("Request timed out")), timeoutMs);
+        })
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    return await bufferResponse(response);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 let revealObserver = null;
 
 function initScrollReveal() {
+  const targets = document.querySelectorAll(".reveal, .reveal-fast, .stagger");
+  if (typeof IntersectionObserver !== "function" || prefersReducedMotion()) {
+    document.documentElement.classList.remove("reveal-enabled");
+    targets.forEach(el => el.classList.add("visible"));
+    return;
+  }
+
   if (!revealObserver) {
     revealObserver = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
@@ -198,8 +273,13 @@ function initScrollReveal() {
     }, { threshold: 0.08, rootMargin: "0px 0px -40px 0px" });
   }
 
-  document.querySelectorAll(".reveal, .reveal-fast, .stagger").forEach(el => {
-    if (!el.classList.contains("visible")) revealObserver.observe(el);
+  targets.forEach(el => {
+    if (el.classList.contains("visible")) return;
+    revealObserver.observe(el);
+    setTimeout(() => {
+      el.classList.add("visible");
+      revealObserver?.unobserve(el);
+    }, REVEAL_FAILSAFE_MS);
   });
 }
 
@@ -244,13 +324,29 @@ function bindEvents() {
     closeOverlay("confirmOverlay");
     if (!id) return;
     try {
-      await sbDelete(id);
+      const outcome = await sbDelete(id);
       closeOverlay("detailOverlay");
       await refresh();
-      setStatus("Deleted.");
+      const cleanupIncomplete = outcome && !["deleted", "not_found", "not_needed"].includes(outcome.imageCleanup);
+      if (outcome?.database === "not_found") {
+        setStatus("Photo was already absent from the portfolio.");
+      } else if (cleanupIncomplete) {
+        setStatus("Deleted from the portfolio. Image storage cleanup did not finish.");
+      } else {
+        setStatus("Deleted.");
+      }
     } catch (err) {
       console.error(err);
-      setStatus(`Delete failed: ${err.message}`);
+      if (err?.deleteIndeterminate) {
+        try {
+          await refresh();
+        } catch (refreshErr) {
+          console.error("Refresh after an unconfirmed delete failed", refreshErr);
+        }
+        setStatus("Delete result was not confirmed. Check the refreshed portfolio before retrying.");
+      } else {
+        setStatus(`Delete failed: ${err.message}`);
+      }
     }
   });
 
@@ -282,6 +378,15 @@ function bindEvents() {
   window.addEventListener("drop", e => e.preventDefault());
 
   const dz = document.getElementById("dropZone");
+  const openUploadPicker = () => {
+    if (state.ownerMode && !state.uploading) document.getElementById("uploadInput").click();
+  };
+  dz.addEventListener("click", openUploadPicker);
+  dz.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    openUploadPicker();
+  });
   dz.addEventListener("dragover", e => {
     if (!state.ownerMode) return;
     e.preventDefault();
@@ -443,6 +548,8 @@ function bindEvents() {
   });
 
   document.addEventListener("keydown", e => {
+    if (e.key === "Tab" && trapOverlayFocus(e)) return;
+
     if (e.key === "Enter" || e.key === " ") {
       const activeEl = document.activeElement;
       if (activeEl && activeEl.classList.contains("series-tile")) {
@@ -521,8 +628,15 @@ function openOverlay(id) {
   setMobileMenu(false);
   const el = document.getElementById(id);
   if (!el) return;
+  if (!el.classList.contains("open")) {
+    overlayReturnFocus.set(id, document.activeElement);
+  }
   el.classList.add("open");
   document.body.classList.add("overlay-open");
+  requestAnimationFrame(() => {
+    const target = getFocusableElements(el)[0];
+    if (target) target.focus();
+  });
 }
 
 function closeOverlay(id) {
@@ -531,6 +645,40 @@ function closeOverlay(id) {
   el.classList.remove("open");
   const anyOpen = OVERLAYS.some(name => document.getElementById(name).classList.contains("open"));
   if (!anyOpen) document.body.classList.remove("overlay-open");
+  const returnTarget = overlayReturnFocus.get(id);
+  overlayReturnFocus.delete(id);
+  if (returnTarget && returnTarget.isConnected) returnTarget.focus();
+}
+
+function getFocusableElements(root) {
+  return Array.from(root.querySelectorAll(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )).filter(el => !el.hidden && el.getClientRects().length > 0);
+}
+
+function trapOverlayFocus(event) {
+  const openOverlays = OVERLAYS
+    .map(id => document.getElementById(id))
+    .filter(el => el && el.classList.contains("open"));
+  const overlay = openOverlays[openOverlays.length - 1];
+  if (!overlay) return false;
+
+  const focusable = getFocusableElements(overlay);
+  if (!focusable.length) return false;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+
+  if (event.shiftKey && (document.activeElement === first || !overlay.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+    return true;
+  }
+  if (!event.shiftKey && (document.activeElement === last || !overlay.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
+    return true;
+  }
+  return false;
 }
 
 function openOwnerAccess() {
@@ -565,7 +713,7 @@ async function handleLogin(e) {
 
   let res;
   try {
-    res = await fetch(`${API_BASE}/verify-owner`, {
+    res = await fetchWithTimeout(`${API_BASE}/verify-owner`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password: pw })
@@ -576,7 +724,11 @@ async function handleLogin(e) {
   }
 
   if (!res.ok) {
-    errEl.textContent = res.status === 401 ? "Incorrect password." : "Sign-in failed. Try again.";
+    errEl.textContent = res.status === 401
+      ? "Incorrect password."
+      : res.status === 500
+        ? "Owner tools are not configured on the server."
+        : "Sign-in failed. Try again.";
     return;
   }
 
@@ -592,7 +744,7 @@ async function handleLogin(e) {
     return;
   }
   state.ownerToken = data.token;
-  sessionStorage.setItem("ownerToken", state.ownerToken);
+  setSessionValue("ownerToken", state.ownerToken);
   e.target.reset();
   document.getElementById("loginErr").textContent = "";
   closeOverlay("loginOverlay");
@@ -604,10 +756,12 @@ async function handleLogin(e) {
 
 function signOut() {
   state.ownerToken = "";
-  sessionStorage.removeItem("ownerToken");
+  removeSessionValue("ownerToken");
   syncOwnerUI();
   closeReview();
   closeOverlay("detailOverlay");
+  document.getElementById("galleryWrap")?.setAttribute("aria-busy", "false");
+  document.getElementById("seriesWrap")?.setAttribute("aria-busy", "false");
   renderSeries();
   renderProjectIntro();
   renderGallery();
@@ -993,7 +1147,9 @@ function makeDraft(photo) {
     series: photo.series || "",
     dateTaken: photo.dateTaken || "",
     location: photo.location || "",
-    coordinates: photo.coordinates || "",
+    // Undefined means this draft came from a public row that never contained
+    // private metadata. Keep that distinction all the way through saving.
+    coordinates: typeof photo.coordinates === "string" ? photo.coordinates : undefined,
     camera: photo.camera || "",
     lens: photo.lens || "",
     aperture: photo.aperture || "",
@@ -1040,7 +1196,7 @@ function renderReview() {
           </div>
           <div class="f-row">
             <div class="field"><label>Focal length</label><input name="focalLength" type="text" value="${escA(draft.focalLength)}" placeholder="35mm" /></div>
-            <div class="field"><label>Coordinates (private)</label><input name="coordinates" type="text" value="${escA(draft.coordinates)}" placeholder="Optional - hidden from visitors" /></div>
+            <div class="field"><label>Coordinates (private)</label><input name="coordinates" type="text" value="${escA(draft.coordinates || "")}" placeholder="Optional - hidden from visitors" /></div>
           </div>
           <label class="featured-toggle">
             <input type="checkbox" name="starred" ${draft.starred ? "checked" : ""} />
@@ -1061,6 +1217,7 @@ async function saveReview() {
   let skipped = 0;
   const failedDrafts = [];
   const failedUrls = [];
+  const failureMessages = [];
 
   state.uploading = true;
   saveBtn.disabled = true;
@@ -1086,7 +1243,7 @@ async function saveReview() {
       description: str(fd.get("description")),
       dateTaken,
       location: str(fd.get("location")),
-      coordinates: str(fd.get("coordinates")),
+      coordinates: typeof draft.coordinates === "string" ? str(fd.get("coordinates")) : undefined,
       camera: str(fd.get("camera")),
       lens: str(fd.get("lens")),
       aperture: str(fd.get("aperture")),
@@ -1115,6 +1272,7 @@ async function saveReview() {
     } catch (err) {
       console.error(err);
       skipped += 1;
+      failureMessages.push(err.message || "The operation failed.");
       failedDrafts.push({ ...draft, ...photo, cloudinaryId: photo.cloudinaryId || draft.cloudinaryId || null });
       if (creating && draft.previewUrl.startsWith("blob:")) failedUrls.push(draft.previewUrl);
       setStatus(`${creating ? "Publish" : "Save"} failed${label}: ${err.message}`);
@@ -1134,7 +1292,13 @@ async function saveReview() {
     state.reviewMode = creating ? "create" : "edit";
     renderReview();
     openOverlay("reviewOverlay");
-    setStatus(saved > 0 ? `${saved} saved, ${skipped} still need attention.` : `Nothing saved. ${skipped} item${skipped === 1 ? "" : "s"} still need attention.`);
+    const summary = saved > 0
+      ? `${saved} saved, ${skipped} still need attention.`
+      : `Nothing saved. ${skipped} item${skipped === 1 ? "" : "s"} still need attention.`;
+    const detail = failureMessages.length
+      ? ` ${failureMessages.length === 1 ? failureMessages[0] : `First error: ${failureMessages[0]}`}`
+      : "";
+    setStatus(summary + detail);
     return;
   }
 
@@ -1164,7 +1328,10 @@ function handleSessionExpired() {
 async function authedFetch(path, init = {}) {
   if (!state.ownerToken) throw new Error("Not signed in.");
   const headers = { ...(init.headers || {}), "Authorization": `Bearer ${state.ownerToken}` };
-  const res = await fetch(`${API_BASE}/${path}`, { ...init, headers });
+  // The proxy caps its database request and any storage cleanup separately.
+  // This outer deadline stays longer than both combined so a committed write
+  // is not reported as a browser timeout.
+  const res = await fetchWithTimeout(`${API_BASE}/${path}`, { ...init, headers }, API_FETCH_TIMEOUT_MS);
   if (res.status === 401) {
     handleSessionExpired();
     throw new Error("Session expired.");
@@ -1191,9 +1358,30 @@ async function uploadPreparedFile(file, photoId) {
   form.append("expire", String(sig.expire));
   form.append("token", sig.token);
 
-  const res = await fetch(IMAGEKIT_UPLOAD_URL, { method: "POST", body: form });
-  const data = await res.json();
+  let res;
+  try {
+    res = await fetchWithTimeout(
+      IMAGEKIT_UPLOAD_URL,
+      { method: "POST", body: form },
+      IMAGEKIT_UPLOAD_TIMEOUT_MS
+    );
+  } catch (err) {
+    if (err?.name === "AbortError" || err?.message === "Request timed out") {
+      throw new Error("Upload timed out before ImageKit confirmed it. The photo was not published; review it and retry.");
+    }
+    throw new Error(`Upload failed before ImageKit confirmed it: ${err?.message || "network error"}`);
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (_) {
+    throw new Error("ImageKit returned an invalid upload response. The photo was not published; review it and retry.");
+  }
   if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
+  if (typeof data?.filePath !== "string" || !data.filePath.trim()) {
+    throw new Error("ImageKit did not confirm the uploaded file path. The photo was not published; review it and retry.");
+  }
   return data.filePath;
 }
 
@@ -1214,6 +1402,7 @@ function pickHeroPhoto() {
 }
 
 function renderHero() {
+  const hero = document.getElementById("top");
   const figure = document.getElementById("heroFigure");
   const img = document.getElementById("heroCoverImg");
   const caption = document.getElementById("heroCaption");
@@ -1224,6 +1413,7 @@ function renderHero() {
   const cover = pickHeroPhoto();
 
   if (!cover) {
+    hero?.classList.add("no-cover");
     figure.classList.add("hidden");
     figure.classList.remove("is-loaded");
     img.removeAttribute("src");
@@ -1232,6 +1422,7 @@ function renderHero() {
     return;
   }
 
+  hero?.classList.remove("no-cover");
   const title = cover.title || titleize(cover.cloudinaryId) || "Untitled";
   figure.classList.remove("hidden", "is-loaded");
   img.onload = () => figure.classList.add("is-loaded");
@@ -1408,18 +1599,61 @@ function weatherFromCode(code) {
 }
 
 async function refresh() {
-  try {
-    [state.photos, state.albums] = await Promise.all([
-      state.ownerMode ? sbGetAllOwner() : sbGetAll(),
-      sbAlbumsGetAll()
-    ]);
+  const generation = ++refreshGeneration;
+  const ownerTokenAtStart = state.ownerToken;
+  const galleryWrap = document.getElementById("galleryWrap");
+  const seriesWrap = document.getElementById("seriesWrap");
+  galleryWrap?.setAttribute("aria-busy", "true");
+  seriesWrap?.setAttribute("aria-busy", "true");
+
+  let ownerReadError = null;
+  const photosRequest = (async () => {
+    if (!ownerTokenAtStart) return sbGetAll();
+    try {
+      return await sbGetAllOwner();
+    } catch (err) {
+      ownerReadError = err;
+      console.warn("Owner read failed; falling back to public portfolio data", err);
+      return sbGetAll();
+    }
+  })();
+
+  const [photosResult, albumsResult] = await Promise.allSettled([
+    photosRequest,
+    sbAlbumsGetAll()
+  ]);
+
+  // A newer refresh owns the UI now. In particular, an old public request
+  // must never replace a newer authenticated response with partial rows.
+  if (generation !== refreshGeneration) return;
+
+  if (ownerReadError && state.ownerToken === ownerTokenAtStart) {
+    // Public rows deliberately omit private coordinates. Disable every owner
+    // mutation before rendering those partial rows, or an unrelated edit could
+    // overwrite stored coordinates with an empty value.
+    signOut();
+  }
+
+  if (photosResult.status === "fulfilled") {
+    state.photos = photosResult.value;
     state.loadFailed = false;
-  } catch (err) {
-    console.error("Could not load portfolio data", err);
+  } else {
+    console.error("Could not load portfolio photos", photosResult.reason);
     state.photos = state.photos || [];
-    state.albums = state.albums || [];
     state.loadFailed = true;
     setStatus("Could not load portfolio. Check your connection and refresh.");
+  }
+
+  if (albumsResult.status === "fulfilled") {
+    state.albums = albumsResult.value;
+  } else {
+    console.warn("Collection details unavailable; deriving collections from photos", albumsResult.reason);
+    state.albums = state.albums || [];
+    if (!state.loadFailed) setStatus("Photos loaded. Collection details are temporarily unavailable.");
+  }
+
+  if (ownerReadError && !state.loadFailed) {
+    setStatus("Owner tools are unavailable. Signed out and showing the public portfolio.");
   }
   sortPhotos();
   state.albumGroups = buildAlbumGroups(state.photos, state.albums);
@@ -1439,6 +1673,8 @@ async function refresh() {
   renderProjectIntro();
   renderGallery();
   initScrollReveal();
+  galleryWrap?.setAttribute("aria-busy", "false");
+  seriesWrap?.setAttribute("aria-busy", "false");
 }
 
 function sortPhotos() {
@@ -1487,6 +1723,7 @@ function buildAlbumGroups(photos, albums) {
       earliestTimestamp: 0,
       description: album.description || "",
       cover: album.coverCloudinaryId || "",
+      availableCovers: [],
       sortOrder: Number(album.sortOrder) || 0,
       hasCustomSort: Number(album.sortOrder) > 0,
       createdAt: album.createdAt || ""
@@ -1503,6 +1740,7 @@ function buildAlbumGroups(photos, albums) {
       earliestTimestamp: 0,
       description: "",
       cover: "",
+      availableCovers: [],
       sortOrder: 0,
       hasCustomSort: false,
       createdAt: ""
@@ -1517,13 +1755,20 @@ function buildAlbumGroups(photos, albums) {
     if (!existing.earliestTimestamp || ts < existing.earliestTimestamp) {
       existing.earliestTimestamp = ts;
     }
-    if (!existing.cover && photo.cloudinaryId) {
-      existing.cover = photo.cloudinaryId;
+    if (photo.cloudinaryId) {
+      existing.availableCovers.push(photo.cloudinaryId);
     }
     map.set(photo.series, existing);
   });
 
   return Array.from(map.values())
+    .map(group => {
+      if (!group.availableCovers.includes(group.cover)) {
+        group.cover = group.availableCovers[0] || "";
+      }
+      delete group.availableCovers;
+      return group;
+    })
     .filter(group => group.name && (group.count > 0 || albums.some(album => album.name === group.name)))
     .sort((a, b) => {
       if (a.hasCustomSort !== b.hasCustomSort) return a.hasCustomSort ? -1 : 1;
@@ -1737,7 +1982,7 @@ function renderGallery() {
     const metaText = compact(uniq([photo.series, publicLocation(photo.location)]));
     return `
       <button type="button" class="photo-brick reveal-fast" data-photo-id="${escA(photo.id)}" aria-label="Open ${escA(photo.title || "photograph")}">
-        <img src="${escA(src)}" alt="${escA(photo.title || "Photograph")}" loading="lazy" decoding="async" />
+        <img src="${escA(src)}" alt="${escA(photo.title || "Photograph")}" loading="eager" decoding="async" fetchpriority="low" />
         ${starBadge}
         <div class="photo-brick-overlay">
           <div class="photo-brick-title">${esc(photo.title || "Untitled")}</div>
@@ -2270,7 +2515,9 @@ function fromRow(row) {
     series: row.series,
     dateTaken: row.date_taken,
     location: row.location,
-    coordinates: row.coordinates,
+    coordinates: Object.prototype.hasOwnProperty.call(row, "coordinates")
+      ? (row.coordinates || "")
+      : undefined,
     camera: row.camera,
     lens: row.lens,
     aperture: row.aperture,
@@ -2286,14 +2533,33 @@ function fromRow(row) {
 // Everything except `coordinates`, which is owner-only. Must stay in sync
 // with the column grant in the database: anon can only SELECT these.
 const SB_PUBLIC_COLS = "id,cloudinary_id,title,description,series,date_taken,location,camera,lens,aperture,shutter_speed,iso,focal_length,uploaded_at,order_timestamp,starred";
+const SB_ALBUMS_PUBLIC_COLS = "name,description,cover_cloudinary_id,sort_order,created_at";
+
+async function sbReadAll(table, columns, order, label) {
+  const rows = [];
+  let start = 0;
+
+  while (true) {
+    const end = start + SB_PAGE_SIZE - 1;
+    const res = await fetchWithTimeout(
+      `${SUPABASE_URL}/rest/v1/${table}?select=${columns}&order=${order}`,
+      { headers: { ...SB_HDR, "Range": `${start}-${end}` } }
+    );
+    if (!res.ok) {
+      console.error(`${label} fetch failed`, await res.text());
+      throw new Error(`${label} fetch failed (HTTP ${res.status})`);
+    }
+
+    const page = await res.json();
+    if (!Array.isArray(page)) throw new Error(`${label} fetch returned invalid data`);
+    rows.push(...page);
+    if (page.length < SB_PAGE_SIZE) return rows;
+    start += page.length;
+  }
+}
 
 async function sbGetAll() {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}?select=${SB_PUBLIC_COLS}&order=order_timestamp.desc`, { headers: SB_HDR });
-  if (!res.ok) {
-    console.error("Supabase fetch failed", await res.text());
-    throw new Error(`Photos fetch failed (HTTP ${res.status})`);
-  }
-  return (await res.json()).map(fromRow);
+  return (await sbReadAll(SB_TABLE, SB_PUBLIC_COLS, "order_timestamp.desc", "Photos")).map(fromRow);
 }
 
 // Owner mode needs the private columns too; those come through the
@@ -2314,10 +2580,19 @@ async function dbWrite(payload, label) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
+  const responseText = await res.text();
   if (!res.ok) {
-    const message = await res.text();
+    const message = responseText;
     console.error(`${label} failed`, message);
-    throw new Error(message);
+    const error = new Error(message || `HTTP ${res.status}`);
+    error.httpStatus = res.status;
+    throw error;
+  }
+  if (!responseText) return null;
+  try {
+    return JSON.parse(responseText);
+  } catch (_) {
+    return null;
   }
 }
 
@@ -2326,7 +2601,23 @@ async function sbUpsert(photo) {
 }
 
 async function sbDelete(id) {
-  await dbWrite({ table: "photos", op: "delete", filterValue: String(id) }, "Photo delete");
+  try {
+    const outcome = await dbWrite(
+      { table: "photos", op: "delete", filterValue: String(id) },
+      "Photo delete"
+    );
+    const validDatabase = ["deleted", "not_found", "completed"].includes(outcome?.database);
+    const validCleanup = typeof outcome?.imageCleanup === "string" && outcome.imageCleanup.length > 0;
+    if (!validDatabase || !validCleanup) {
+      throw new Error("The server returned an invalid delete result.");
+    }
+    return outcome;
+  } catch (err) {
+    if (err?.httpStatus || err?.message === "Session expired.") throw err;
+    const deleteError = new Error(err?.message || "The delete result could not be confirmed.");
+    deleteError.deleteIndeterminate = true;
+    throw deleteError;
+  }
 }
 
 async function sbToggleStar(id, starred) {
@@ -2353,12 +2644,7 @@ function toAlbumRow(album) {
 }
 
 async function sbAlbumsGetAll() {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SB_ALBUMS_TABLE}?select=*&order=sort_order.asc,name.asc`, { headers: SB_HDR });
-  if (!res.ok) {
-    console.error("Albums fetch failed", await res.text());
-    throw new Error(`Albums fetch failed (HTTP ${res.status})`);
-  }
-  return (await res.json()).map(fromAlbumRow);
+  return (await sbReadAll(SB_ALBUMS_TABLE, SB_ALBUMS_PUBLIC_COLS, "sort_order.asc,name.asc", "Albums")).map(fromAlbumRow);
 }
 
 async function sbAlbumUpsert(album) {

@@ -1,6 +1,7 @@
 name: Supabase keep-alive
 
-# Supabase free projects pause after ~7 days of inactivity. We ping the REST API daily.
+# Supabase free projects pause after inactivity. We exercise the same public
+# REST contract as the site daily, so the check catches both pauses and grant drift.
 #
 # Why DAILY (not every few days)? GitHub's scheduled runs are "best effort" — they can be
 # delayed or skipped entirely under load. A daily ping keeps a comfortable margin even if a
@@ -28,28 +29,37 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Ping Supabase REST API
+      - name: Verify Supabase visitor reads
         env:
           SUPABASE_URL: https://beanpxolozlggbwdoqjl.supabase.co
           SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlYW5weG9sb3psZ2did2RvcWpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3Mjk5ODgsImV4cCI6MjA5MDMwNTk4OH0.isvxqR-lIk8nchcGdBBXq9OQ2COIyr4AnDO6hOxzLHc
         run: |
           set -euo pipefail
-          echo "Pinging $SUPABASE_URL at $(date -u)"
+          PHOTOS_SELECT="id,cloudinary_id,title,description,series,date_taken,location,camera,lens,aperture,shutter_speed,iso,focal_length,uploaded_at,order_timestamp,starred"
+          ALBUMS_SELECT="name,description,cover_cloudinary_id,sort_order,created_at"
+          echo "Checking visitor data at $(date -u)"
           STATUS=$(curl -sS \
             --retry 5 --retry-all-errors --retry-delay 10 --max-time 30 \
             -o /tmp/resp.json -w "%{http_code}" \
             -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
-            "$SUPABASE_URL/rest/v1/photos?limit=1&select=id") || true
-          echo "HTTP $STATUS"
-          if [ "$STATUS" = "200" ]; then
-            echo "✓ Supabase is alive."
-            exit 0
+            "$SUPABASE_URL/rest/v1/photos?select=$PHOTOS_SELECT&order=order_timestamp.desc&limit=1") || true
+          if [ "$STATUS" != "200" ] || ! jq -e 'type == "array" and length >= 1' /tmp/resp.json >/dev/null 2>&1; then
+            echo "Photos read failed: HTTP $STATUS"
+            cat /tmp/resp.json 2>/dev/null || true
+            exit 1
           fi
-          echo "✗ Unexpected status: $STATUS — the project is likely PAUSED."
-          echo "Response body:"
-          cat /tmp/resp.json 2>/dev/null || echo "(no response body)"
-          echo ""
-          echo "A read-only ping cannot wake a paused project."
-          echo "→ Open the Supabase dashboard, restore the project, and this job will pass again."
-          exit 1
+
+          STATUS=$(curl -sS \
+            --retry 5 --retry-all-errors --retry-delay 10 --max-time 30 \
+            -o /tmp/albums.json -w "%{http_code}" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "$SUPABASE_URL/rest/v1/albums?select=$ALBUMS_SELECT&order=sort_order.asc,name.asc&limit=1") || true
+          if [ "$STATUS" != "200" ] || ! jq -e 'type == "array"' /tmp/albums.json >/dev/null 2>&1; then
+            echo "Albums read failed: HTTP $STATUS"
+            cat /tmp/albums.json 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "Supabase visitor reads are healthy."

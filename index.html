@@ -18,22 +18,33 @@
   <meta name="twitter:title" id="twitterTitle" content="Anh Trinh | Photography" />
   <meta name="twitter:description" id="twitterDescription" content="Street and travel photographs by Anh Trinh: Vietnam, Japan, New York, and the San Francisco Bay Area." />
   <meta name="twitter:image" id="twitterImage" content="social-preview.png" />
+  <link rel="icon" href="social-preview.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Cormorant:ital,wght@0,300;0,400;1,300;1,400&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <noscript>
+    <style>
+      .hero { grid-template-columns: 1fr; }
+      .hero-left { border-right: 0; }
+      .hero-right { display: none; }
+    </style>
+  </noscript>
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Skip to content</a>
+  <noscript>
+    <p class="noscript-banner">Enable JavaScript to load the photograph archive.</p>
+  </noscript>
 
-  <nav class="nav" id="mainNav">
+  <nav class="nav" id="mainNav" aria-label="Primary navigation">
     <a class="nav-brand" href="#top" id="navBrand">Anh Trinh</a>
     <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="mobileMenu" aria-label="Open navigation menu">
       <span></span>
       <span></span>
       <span></span>
     </button>
-    <div class="nav-links" aria-label="Primary navigation">
+    <div class="nav-links">
       <div class="nav-dropdown">
         <button class="nav-dropdown-btn" aria-haspopup="true" aria-expanded="false">
           Collections
@@ -63,7 +74,7 @@
   <main id="mainContent">
     <section class="hero" id="top">
       <div class="hero-left">
-        <div class="hero-now" id="heroNow" aria-label="Where I am right now">
+        <div class="hero-now" id="heroNow" role="group" aria-label="Where I am right now">
           <span class="hero-now-place" id="heroNowPlace">San Francisco Bay Area</span>
           <span class="hero-now-live">
             <span class="hero-now-wx" id="heroWeather" hidden>
@@ -71,7 +82,7 @@
               <span id="heroWeatherText"></span>
             </span>
             <span class="hero-now-sep" id="heroNowSep" aria-hidden="true" hidden>·</span>
-            <time class="hero-now-time" id="heroClock"></time>
+            <span class="hero-now-time" id="heroClock"></span>
           </span>
         </div>
 
@@ -95,7 +106,7 @@
       <div class="hero-right">
         <span class="hero-nav-scrim" aria-hidden="true"></span>
         <button class="hero-figure hidden" id="heroFigure" type="button" aria-label="View the featured photograph">
-          <img class="hero-photo" id="heroCoverImg" alt="Featured photograph" fetchpriority="high" />
+          <img class="hero-photo" id="heroCoverImg" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="Featured photograph" fetchpriority="high" />
           <span class="hero-figure-veil" aria-hidden="true"></span>
           <span class="hero-caption" id="heroCaption" hidden>
             <span class="hero-caption-mark" aria-hidden="true">Featured · new each visit</span>
@@ -110,12 +121,12 @@
       <div class="section-rule reveal">
         <span class="rule-num">01</span>
         <div class="rule-line"></div>
-        <span class="rule-label">Collections</span>
+        <h2 class="rule-label">Collections</h2>
       </div>
       <button class="btn-ghost hidden" id="newAlbumBtn" type="button" style="margin-bottom:32px;">+ New Collection</button>
       <div id="seriesWrap" class="stagger">
         <div class="empty-placeholder">
-          Collections appear as the archive grows.
+          Loading collections...
         </div>
       </div>
     </section>
@@ -126,10 +137,10 @@
       <div class="section-rule reveal">
         <span class="rule-num">02</span>
         <div class="rule-line"></div>
-        <span class="rule-label">Selected work</span>
+        <h2 class="rule-label">Selected work</h2>
       </div>
 
-      <div class="drop-zone" id="dropZone">
+      <div class="drop-zone" id="dropZone" role="button" tabindex="0" aria-label="Upload photographs">
         <div class="drop-icon">↑</div>
         <strong>Drop photos here</strong>
         <p>JPG · PNG · HEIC · WEBP · every upload opens a review screen before publishing</p>
@@ -155,8 +166,8 @@
 
       <div id="galleryWrap">
         <div class="empty">
-          <h3>Selected work is on the way.</h3>
-          <p>This space updates as new photographs are added to the archive.</p>
+          <h3>Loading selected work...</h3>
+          <p>The archive should appear in a moment.</p>
           <div class="empty-actions" id="emptyActions"></div>
         </div>
       </div>
@@ -173,7 +184,7 @@
         <div class="reveal">
           <h2 class="section-display" id="aboutHeadline">Based in the<br>San Francisco Bay Area.</h2>
           <figure class="about-figure" id="aboutFigure" hidden>
-            <img id="aboutPhoto" alt="" loading="lazy" />
+            <img id="aboutPhoto" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="" loading="lazy" />
             <figcaption class="about-figure-cap"><span id="aboutPhotoTitle"></span></figcaption>
           </figure>
         </div>
@@ -264,13 +275,13 @@
   </div>
 
   <div class="modal-overlay" id="loginOverlay">
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
       <div class="modal-head">
         <div>
           <p class="modal-head-label">Owner access</p>
-          <h3>Unlock the archive tools</h3>
+          <h3 id="loginTitle">Unlock the archive tools</h3>
         </div>
-        <button class="close-btn" data-close="loginOverlay" type="button">×</button>
+        <button class="close-btn" data-close="loginOverlay" type="button" aria-label="Close owner sign-in">×</button>
       </div>
       <div class="modal-body">
         <form id="loginForm" class="login-grid">
@@ -287,13 +298,13 @@
   </div>
 
   <div class="modal-overlay" id="reviewOverlay">
-    <div class="modal wide">
+    <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="reviewTitle">
       <div class="modal-head">
         <div>
           <p class="modal-head-label" id="reviewLabel">Review upload</p>
           <h3 id="reviewTitle">Check extracted metadata</h3>
         </div>
-        <button class="close-btn" data-close="reviewOverlay" type="button">×</button>
+        <button class="close-btn" data-close="reviewOverlay" type="button" aria-label="Close upload review">×</button>
       </div>
       <div class="modal-body">
         <div class="review-list" id="reviewList"></div>
@@ -309,13 +320,13 @@
   </div>
 
   <div class="modal-overlay" id="detailOverlay">
-    <div class="modal detail-modal">
+    <div class="modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
       <div class="detail-layout">
         <div class="detail-img-wrap" id="detailImgWrap">
-          <button class="close-btn detail-close" data-close="detailOverlay" type="button">×</button>
-          <button class="detail-nav-btn prev" id="prevBtn" type="button">‹</button>
-          <button class="detail-nav-btn next" id="nextBtn" type="button">›</button>
-          <img id="detailImg" alt="Photograph" />
+          <button class="close-btn detail-close" data-close="detailOverlay" type="button" aria-label="Close photograph details">×</button>
+          <button class="detail-nav-btn prev" id="prevBtn" type="button" aria-label="Previous photograph">‹</button>
+          <button class="detail-nav-btn next" id="nextBtn" type="button" aria-label="Next photograph">›</button>
+          <img id="detailImg" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="Photograph" />
         </div>
         <div class="detail-info">
           <p class="detail-counter" id="detailCounter">Photograph</p>
@@ -331,13 +342,13 @@
   </div>
 
   <div class="modal-overlay" id="albumOverlay">
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="albumModalTitle">
       <div class="modal-head">
         <div>
           <p class="modal-head-label" id="albumModalLabel">Collection</p>
           <h3 id="albumModalTitle">New Collection</h3>
         </div>
-        <button class="close-btn" data-close="albumOverlay" type="button">×</button>
+        <button class="close-btn" data-close="albumOverlay" type="button" aria-label="Close collection editor">×</button>
       </div>
       <div class="modal-body">
         <form id="albumForm" class="login-grid">
@@ -369,13 +380,13 @@
   </div>
 
   <div class="modal-overlay" id="confirmOverlay">
-    <div class="modal">
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMsg">
       <div class="modal-head">
         <div>
           <p class="modal-head-label">Confirm</p>
-          <h3>Delete this photograph?</h3>
+          <h3 id="confirmTitle">Delete this photograph?</h3>
         </div>
-        <button class="close-btn" data-close="confirmOverlay" type="button">×</button>
+        <button class="close-btn" data-close="confirmOverlay" type="button" aria-label="Close delete confirmation">×</button>
       </div>
       <div class="confirm-body">
         <p id="confirmMsg">This will permanently remove the photo. It cannot be undone.</p>

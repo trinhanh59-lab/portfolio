@@ -34,7 +34,13 @@ exports.handler = async (event) => {
   const sessionSecret = process.env.SESSION_SECRET;
   const ikPrivateKey = process.env.IMAGEKIT_PRIVATE_KEY;
   const ikPublicKey = process.env.IMAGEKIT_PUBLIC_KEY;
-  if (!sessionSecret || !ikPrivateKey || !ikPublicKey) {
+  const missingEnv = [
+    ["SESSION_SECRET", sessionSecret],
+    ["IMAGEKIT_PRIVATE_KEY", ikPrivateKey],
+    ["IMAGEKIT_PUBLIC_KEY", ikPublicKey]
+  ].filter(([, value]) => !value).map(([name]) => name);
+  if (missingEnv.length) {
+    console.error(`imagekit-auth missing environment variables: ${missingEnv.join(", ")}`);
     return { statusCode: 500, body: "Server not configured" };
   }
 
