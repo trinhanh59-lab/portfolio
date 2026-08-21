@@ -1,16 +1,16 @@
 const SITE = {
   name: "Anh Trinh",
   pageTitle: "Anh Trinh | Photography",
-  metaDescription: "Street and travel photographs by Anh Trinh: Vietnam, Japan, New York, and the San Francisco Bay Area.",
+  metaDescription: "Street and travel photographs by Anh Trinh: Vietnam, Japan, New York, Houston, and the San Francisco Bay Area.",
   eyebrow: "Street & travel photographs",
   heroTitle: "Vietnam, Japan,<br>New York, <em>and home.</em>",
   heroText: "A small, growing archive of photographs grouped by place instead of date. Start with the collections.",
-  aboutHeadline: "Based in the<br>San Francisco Bay Area.",
+  aboutHeadline: "Based in<br>Houston, Texas.",
   aboutTagline: "Mostly cities, mostly on foot.",
-  aboutText: "I'm Anh. I photograph the places I pass through. Lately that means Vietnam, Japan, New York, Houston, and the Bay Area, where I live. I carry a Fujifilm X100VI when I plan to shoot and a phone when I don't. The keepers end up here, grouped by place.",
+  aboutText: "I'm Anh. I photograph the places I pass through. Lately that means Vietnam, Japan, New York, the Bay Area, and Houston, where I live. I carry a Fujifilm X100VI when I plan to shoot and a phone when I don't. The keepers end up here, grouped by place.",
   contactDisplay: "If one of these<br>belongs on your wall, <em>say so.</em>",
   contactSub: "Prints and licensing start with an email. So does telling me which one stayed with you.",
-  location: "San Francisco Bay Area",
+  location: "Houston, Texas",
   email: "Trinhanh59@gmail.com",
   instagramUrl: "",
   siteUrl: "https://anhphotography.netlify.app"
@@ -19,10 +19,10 @@ const SITE = {
 // Live "right now" strip in the hero. Weather is from Open-Meteo (no API key needed).
 // To re-base the site, change lat/lon/timezone/label. unit: "fahrenheit" or "celsius".
 const PLACE = {
-  label:    "San Francisco Bay Area",
-  lat:      37.7749,
-  lon:      -122.4194,
-  timezone: "America/Los_Angeles",
+  label:    "Houston, Texas",
+  lat:      29.7604,
+  lon:      -95.3698,
+  timezone: "America/Chicago",
   unit:     "fahrenheit"
 };
 

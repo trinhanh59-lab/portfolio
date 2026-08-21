@@ -60,6 +60,12 @@ assert(app.includes('typeof data?.filePath !== "string"'), "ImageKit upload acce
 assert(app.includes("First error: ${failureMessages[0]}"), "Upload failures lose their actionable reason");
 assert(netlifyConfig.includes('from = "/api/*"'), "Netlify API redirect is missing");
 assert(netlifyConfig.includes("X-Content-Type-Options"), "Baseline security headers are missing");
+assert(app.includes('location: "Houston, Texas"'), "Public location is not based in Houston");
+assert(app.includes('label:    "Houston, Texas"'), "Live location label is not based in Houston");
+assert(app.includes("lat:      29.7604"), "Houston weather latitude is missing");
+assert(app.includes("lon:      -95.3698"), "Houston weather longitude is missing");
+assert(app.includes('timezone: "America/Chicago"'), "Houston timezone is missing");
+assert(html.includes('id="footerSecretTrigger">© Anh Trinh · Houston, Texas · 2026'), "Footer location is not based in Houston");
 
 assert(app.includes('window.addEventListener("popstate"'), "Back/Forward route restoration is missing");
 assert(app.includes('portfolioPhotoEntry'), "Photo history entries are not distinguished from direct links");
