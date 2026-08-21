@@ -22,7 +22,12 @@ exports.handler = async (event) => {
 
   const ownerPassword = process.env.OWNER_PASSWORD;
   const sessionSecret = process.env.SESSION_SECRET;
-  if (!ownerPassword || !sessionSecret) {
+  const missingEnv = [
+    ["OWNER_PASSWORD", ownerPassword],
+    ["SESSION_SECRET", sessionSecret]
+  ].filter(([, value]) => !value).map(([name]) => name);
+  if (missingEnv.length) {
+    console.error(`verify-owner missing environment variables: ${missingEnv.join(", ")}`);
     return { statusCode: 500, body: "Server not configured" };
   }
 
@@ -39,7 +44,7 @@ exports.handler = async (event) => {
     await new Promise(resolve => setTimeout(resolve, 1000));
     return {
       statusCode: 401,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
       body: JSON.stringify({ error: "Incorrect password." })
     };
   }
@@ -47,7 +52,7 @@ exports.handler = async (event) => {
   const token = createSessionToken(sessionSecret);
   return {
     statusCode: 200,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
     body: JSON.stringify({ token, expiresInSeconds: SESSION_TTL_SECONDS })
   };
 };

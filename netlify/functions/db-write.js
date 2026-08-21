@@ -9,6 +9,18 @@ const ALLOWED = {
   photos: { filterKey: "id" },
   albums: { filterKey: "name" }
 };
+const FETCH_TIMEOUT_MS = 15000;
+const READ_PAGE_SIZE = 1000;
+
+async function fetchWithTimeout(url, init = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function verifySessionToken(token, secret) {
   if (typeof token !== "string" || !token.includes(".")) return false;
@@ -41,7 +53,7 @@ async function deleteImageKitFile(filePath) {
   if (!key || !filePath) return;
   const auth = "Basic " + Buffer.from(`${key}:`).toString("base64");
   const name = filePath.split("/").pop();
-  const search = await fetch(
+  const search = await fetchWithTimeout(
     `https://api.imagekit.io/v1/files?searchQuery=${encodeURIComponent(`name="${name}"`)}`,
     { headers: { Authorization: auth } }
   );
@@ -49,7 +61,7 @@ async function deleteImageKitFile(filePath) {
   const files = await search.json();
   const match = Array.isArray(files) ? files.find(f => f.filePath === filePath) : null;
   if (!match) return;
-  await fetch(`https://api.imagekit.io/v1/files/${match.fileId}`, {
+  await fetchWithTimeout(`https://api.imagekit.io/v1/files/${match.fileId}`, {
     method: "DELETE",
     headers: { Authorization: auth }
   });
@@ -63,7 +75,13 @@ exports.handler = async (event) => {
   const sessionSecret = process.env.SESSION_SECRET;
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!sessionSecret || !supabaseUrl || !serviceKey) {
+  const missingEnv = [
+    ["SESSION_SECRET", sessionSecret],
+    ["SUPABASE_URL", supabaseUrl],
+    ["SUPABASE_SERVICE_ROLE_KEY", serviceKey]
+  ].filter(([, value]) => !value).map(([name]) => name);
+  if (missingEnv.length) {
+    console.error(`db-write missing environment variables: ${missingEnv.join(", ")}`);
     return { statusCode: 500, body: "Server not configured" };
   }
 
@@ -99,12 +117,34 @@ exports.handler = async (event) => {
   // (coordinates), so owner mode fetches complete rows through this path.
   if (op === "select") {
     const order = table === "photos" ? "order_timestamp.desc" : "sort_order.asc,name.asc";
-    const readRes = await fetch(`${url}?select=*&order=${order}`, { headers });
-    const readText = await readRes.text();
-    if (!readRes.ok) {
-      return { statusCode: readRes.status, body: readText || "Database error" };
+    const rows = [];
+    let start = 0;
+    while (true) {
+      const end = start + READ_PAGE_SIZE - 1;
+      const readRes = await fetchWithTimeout(`${url}?select=*&order=${order}`, {
+        headers: { ...headers, "Range": `${start}-${end}` }
+      });
+      const readText = await readRes.text();
+      if (!readRes.ok) {
+        return { statusCode: readRes.status, body: readText || "Database error" };
+      }
+
+      let page;
+      try {
+        page = JSON.parse(readText || "[]");
+      } catch {
+        return { statusCode: 502, body: "Invalid database response" };
+      }
+      if (!Array.isArray(page)) return { statusCode: 502, body: "Invalid database response" };
+      rows.push(...page);
+      if (page.length < READ_PAGE_SIZE) break;
+      start += page.length;
     }
-    return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: readText || "[]" };
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      body: JSON.stringify(rows)
+    };
   }
 
   if (op === "upsert") {
@@ -132,7 +172,7 @@ exports.handler = async (event) => {
     if (table === "photos") {
       // Look up the stored file path before the row disappears.
       try {
-        const lookup = await fetch(
+        const lookup = await fetchWithTimeout(
           `${supabaseUrl}/rest/v1/photos?id=eq.${encodeURIComponent(filterValue)}&select=cloudinary_id`,
           { headers }
         );
@@ -150,7 +190,7 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: "Unknown op" };
   }
 
-  const res = await fetch(url, init);
+  const res = await fetchWithTimeout(url, init);
   const text = await res.text();
   if (!res.ok) {
     return { statusCode: res.status, body: text || "Database error" };

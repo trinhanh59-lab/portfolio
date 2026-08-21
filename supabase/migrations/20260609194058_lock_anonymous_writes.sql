@@ -1,0 +1,4 @@
+-- Historical marker for a migration that was applied directly to the hosted
+-- project before this repository tracked Supabase schema changes. The current
+-- schema and access model are reconstructed by the later
+-- 20260821154541_normalize_portfolio_access migration.
