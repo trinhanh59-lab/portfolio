@@ -1425,6 +1425,27 @@ footer {
 .owner-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .status-txt { font-size: 0.76rem; color: var(--muted); font-family: var(--mono); }
 
+.site-notice {
+  position: fixed;
+  top: 76px;
+  left: 50%;
+  z-index: 260;
+  max-width: calc(100vw - 32px);
+  padding: 10px 16px;
+  border: 1px solid rgba(239,233,221,0.18);
+  border-radius: 999px;
+  background: rgba(28,26,23,0.94);
+  color: #f4efe4;
+  box-shadow: 0 12px 32px rgba(28,26,23,0.2);
+  font-size: 0.78rem;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.site-notice.visible { opacity: 1; transform: translate(-50%, 0); }
+
 .upload-btn {
   background: transparent;
   border: 1px solid var(--line2);
@@ -1673,6 +1694,16 @@ footer {
 
 .detail-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 
+.share-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.project-actions > .share-actions { margin-left: auto; }
+.share-btn { min-height: 44px; }
+.detail-share-actions { padding: 2px 0 4px; }
+
 .tag {
   font-family: var(--mono);
   font-size: 0.65rem;
@@ -1910,6 +1941,7 @@ footer {
   .f-row.three { grid-template-columns: 1fr 1fr; }
   .contact-display { font-size: clamp(2.4rem, 9vw, 3.8rem); }
   .project-meta-grid { gap: 14px 20px; }
+  .project-actions > .share-actions { flex-basis: 100%; margin-left: 0; }
   .meta-grid { grid-template-columns: 1fr; }
   .owner-shell { padding: 14px 16px; }
 }

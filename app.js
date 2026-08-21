@@ -1,16 +1,16 @@
 const SITE = {
   name: "Anh Trinh",
   pageTitle: "Anh Trinh | Photography",
-  metaDescription: "Street and travel photographs by Anh Trinh: Vietnam, Japan, New York, and the San Francisco Bay Area.",
+  metaDescription: "Street and travel photographs by Anh Trinh: Vietnam, Japan, New York, Houston, and the San Francisco Bay Area.",
   eyebrow: "Street & travel photographs",
   heroTitle: "Vietnam, Japan,<br>New York, <em>and home.</em>",
   heroText: "A small, growing archive of photographs grouped by place instead of date. Start with the collections.",
-  aboutHeadline: "Based in the<br>San Francisco Bay Area.",
+  aboutHeadline: "Based in<br>Houston, Texas.",
   aboutTagline: "Mostly cities, mostly on foot.",
-  aboutText: "I'm Anh. I photograph the places I pass through. Lately that means Vietnam, Japan, New York, Houston, and the Bay Area, where I live. I carry a Fujifilm X100VI when I plan to shoot and a phone when I don't. The keepers end up here, grouped by place.",
+  aboutText: "I'm Anh. I photograph the places I pass through. Lately that means Vietnam, Japan, New York, the Bay Area, and Houston, where I live. I carry a Fujifilm X100VI when I plan to shoot and a phone when I don't. The keepers end up here, grouped by place.",
   contactDisplay: "If one of these<br>belongs on your wall, <em>say so.</em>",
   contactSub: "Prints and licensing start with an email. So does telling me which one stayed with you.",
-  location: "San Francisco Bay Area",
+  location: "Houston, Texas",
   email: "Trinhanh59@gmail.com",
   instagramUrl: "",
   siteUrl: "https://anhphotography.netlify.app"
@@ -19,10 +19,10 @@ const SITE = {
 // Live "right now" strip in the hero. Weather is from Open-Meteo (no API key needed).
 // To re-base the site, change lat/lon/timezone/label. unit: "fahrenheit" or "celsius".
 const PLACE = {
-  label:    "San Francisco Bay Area",
-  lat:      37.7749,
-  lon:      -122.4194,
-  timezone: "America/Los_Angeles",
+  label:    "Houston, Texas",
+  lat:      29.7604,
+  lon:      -95.3698,
+  timezone: "America/Chicago",
   unit:     "fahrenheit"
 };
 
@@ -54,6 +54,7 @@ const API_FETCH_TIMEOUT_MS = 25000;
 const IMAGEKIT_UPLOAD_TIMEOUT_MS = 60000;
 const SB_PAGE_SIZE = 1000;
 const REVEAL_FAILSAFE_MS = 2500;
+const PORTFOLIO_HISTORY_KEY = "portfolioRoute";
 
 function getSessionValue(key) {
   try {
@@ -116,6 +117,10 @@ const state = {
 
 let ownerLibrariesPromise = null;
 let refreshGeneration = 0;
+let portfolioRouteReady = false;
+let initialPortfolioRouteApplied = false;
+let siteNoticeTimer = null;
+let detailRenderKey = "";
 
 const OVERLAYS = ["loginOverlay", "reviewOverlay", "detailOverlay", "confirmOverlay", "albumOverlay"];
 const overlayReturnFocus = new Map();
@@ -133,6 +138,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initNavScroll();
   initRightNow();
   bindEvents();
+  initPortfolioHistory();
   syncOwnerUI();
   handleOwnerHash();
   if (state.ownerMode) {
@@ -193,9 +199,7 @@ function defaultSocialImageUrl() {
 }
 
 function updateCanonicalMeta() {
-  const canonical = SITE.siteUrl
-    ? SITE.siteUrl.replace(/\/$/, "") + window.location.pathname
-    : window.location.origin + window.location.pathname;
+  const canonical = buildPortfolioUrl({}, { share: true }).href;
   setAttr("canonicalLink", "href", canonical);
   setAttr("ogUrl", "content", canonical);
 }
@@ -203,6 +207,385 @@ function updateCanonicalMeta() {
 function updateSocialImage(src) {
   setAttr("ogImage", "content", src || "");
   setAttr("twitterImage", "content", src || "");
+}
+
+function initPortfolioHistory() {
+  if (history.state?.[PORTFOLIO_HISTORY_KEY]) return;
+  history.replaceState({
+    ...(history.state || {}),
+    [PORTFOLIO_HISTORY_KEY]: true,
+    portfolioPhotoEntry: false
+  }, "", window.location.href);
+}
+
+function readPortfolioUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    collection: str(params.get("collection")),
+    photo: str(params.get("photo")),
+    view: str(params.get("view"))
+  };
+}
+
+function resolvePortfolioUrlState(requested = readPortfolioUrl()) {
+  const exactGroup = state.albumGroups.find(group => group.name === requested.collection);
+  const foldedCollection = requested.collection.toLocaleLowerCase();
+  const group = exactGroup || state.albumGroups.find(item => item.name.toLocaleLowerCase() === foldedCollection);
+  const photo = state.photos.find(item => item.id === requested.photo);
+  let collection = group?.name || "";
+  let view = requested.view === "featured" ? "featured" : "";
+  let collectionMismatch = false;
+  let featuredMismatch = false;
+
+  if (collection) view = "";
+  if (photo && collection && photo.series !== collection) {
+    collection = "";
+    collectionMismatch = true;
+  }
+  if (photo && view === "featured" && !photo.starred) {
+    view = "";
+    featuredMismatch = true;
+  }
+
+  const mismatch = collectionMismatch || featuredMismatch;
+
+  const route = { collection, photo: photo?.id || "", view };
+  const invalidCollection = Boolean(requested.collection && !group);
+  const invalidPhoto = Boolean(requested.photo && !photo);
+  const invalidView = Boolean(requested.view && requested.view !== "featured");
+  const needsNormalization = invalidCollection
+    || invalidPhoto
+    || invalidView
+    || mismatch
+    || requested.collection !== route.collection
+    || requested.photo !== route.photo
+    || requested.view !== route.view;
+
+  return {
+    route,
+    activeAlbum: collection || (view === "featured" ? "starred" : "all"),
+    activeId: route.photo || null,
+    invalidCollection,
+    invalidPhoto,
+    invalidView,
+    mismatch,
+    collectionMismatch,
+    featuredMismatch,
+    needsNormalization
+  };
+}
+
+function activePortfolioRoute(photoId = state.activeId || "") {
+  return {
+    collection: state.activeAlbum !== "all" && state.activeAlbum !== "starred" ? state.activeAlbum : "",
+    view: state.activeAlbum === "starred" ? "featured" : "",
+    photo: photoId
+  };
+}
+
+function buildPortfolioUrl(route = {}, { share = false } = {}) {
+  let url;
+  if (share) {
+    try {
+      url = new URL(SITE.siteUrl || window.location.origin);
+    } catch (_) {
+      url = new URL(window.location.origin);
+    }
+    url.pathname = window.location.pathname || "/";
+    url.search = "";
+  } else {
+    url = new URL(window.location.href);
+  }
+
+  url.hash = "";
+  ["collection", "photo", "view"].forEach(param => url.searchParams.delete(param));
+  if (route.collection) url.searchParams.set("collection", route.collection);
+  if (route.photo) url.searchParams.set("photo", route.photo);
+  if (route.view === "featured") url.searchParams.set("view", "featured");
+  return url;
+}
+
+function commitPortfolioUrl(route, { mode = "push", photoEntry = false } = {}) {
+  const target = buildPortfolioUrl(route);
+  const nextPath = target.pathname + target.search;
+  const currentPath = window.location.pathname + window.location.search;
+  const nextState = {
+    ...(history.state || {}),
+    [PORTFOLIO_HISTORY_KEY]: true,
+    portfolioPhotoEntry: Boolean(route.photo && photoEntry)
+  };
+
+  if (nextPath === currentPath) {
+    if (mode === "replace" && (
+      !history.state?.[PORTFOLIO_HISTORY_KEY]
+      || Boolean(history.state?.portfolioPhotoEntry) !== nextState.portfolioPhotoEntry
+    )) {
+      history.replaceState(nextState, "", nextPath);
+    }
+    updateViewMeta();
+    return false;
+  }
+
+  const method = mode === "replace" ? "replaceState" : "pushState";
+  history[method](nextState, "", nextPath);
+  updateViewMeta();
+  return true;
+}
+
+function applyPortfolioUrlState({ render = true, announce = true, source = "refresh" } = {}) {
+  if (!portfolioRouteReady) return false;
+
+  const resolved = resolvePortfolioUrlState();
+  const sameView = state.activeAlbum === resolved.activeAlbum;
+  const preserveSearch = sameView
+    && Boolean(state.searchQ)
+    && (source === "popstate" || (source === "refresh" && initialPortfolioRouteApplied));
+  const viewChanged = !sameView || (!preserveSearch && Boolean(state.searchQ));
+  state.activeAlbum = resolved.activeAlbum;
+  state.activeId = resolved.activeId;
+  if (!preserveSearch) {
+    state.searchQ = "";
+    const search = document.getElementById("searchInput");
+    if (search) search.value = "";
+  }
+
+  if (resolved.needsNormalization) {
+    commitPortfolioUrl(resolved.route, {
+      mode: "replace",
+      photoEntry: Boolean(resolved.route.photo && history.state?.portfolioPhotoEntry)
+    });
+  }
+
+  if (render && viewChanged) {
+    renderFilters();
+    renderProjectIntro();
+    renderGallery();
+    initScrollReveal();
+  }
+  syncDetailOverlayFromState();
+  updateViewMeta();
+
+  if (announce && (resolved.invalidPhoto || resolved.invalidCollection || resolved.mismatch)) {
+    if (resolved.invalidPhoto && resolved.route.collection) {
+      showSiteNotice("That photograph is no longer available. Showing the collection.");
+    } else if (resolved.invalidPhoto) {
+      showSiteNotice("That photograph is no longer available. Showing the gallery.");
+    } else if (resolved.invalidCollection && resolved.route.photo) {
+      showSiteNotice("That collection is no longer available. Showing the photograph.");
+    } else if (resolved.featuredMismatch) {
+      showSiteNotice("This photograph is no longer featured. Showing the photograph.");
+    } else if (resolved.collectionMismatch) {
+      showSiteNotice("This photograph moved to another collection. Showing the photograph.");
+    } else {
+      showSiteNotice("That collection is no longer available. Showing all work.");
+    }
+  }
+  return true;
+}
+
+function hasBlockingOverlay() {
+  return ["loginOverlay", "reviewOverlay", "confirmOverlay", "albumOverlay"]
+    .some(id => document.getElementById(id)?.classList.contains("open"));
+}
+
+function syncDetailOverlayFromState() {
+  const overlay = document.getElementById("detailOverlay");
+  const photo = state.activeId && state.photos.find(item => item.id === state.activeId);
+  if (!photo) {
+    state.activeId = null;
+    if (overlay?.classList.contains("open")) closeOverlay("detailOverlay");
+    return;
+  }
+  if (hasBlockingOverlay()) return;
+  const nextRenderKey = buildDetailRenderKey(photo);
+  if (overlay?.classList.contains("open") && detailRenderKey === nextRenderKey) return;
+  renderDetail(photo);
+  if (!overlay?.classList.contains("open")) openOverlay("detailOverlay");
+}
+
+function buildDetailRenderKey(photo) {
+  return JSON.stringify({
+    ownerMode: state.ownerMode,
+    activeAlbum: state.activeAlbum,
+    searchQ: state.searchQ,
+    sortOrder: state.sortOrder,
+    photo,
+    photoOrder: filtered().map(item => item.id)
+  });
+}
+
+function closeDetailFromUser() {
+  const hadPhoto = Boolean(readPortfolioUrl().photo || state.activeId);
+  state.activeId = null;
+  closeOverlay("detailOverlay");
+  if (!hadPhoto) return;
+
+  if (history.state?.[PORTFOLIO_HISTORY_KEY] && history.state?.portfolioPhotoEntry) {
+    history.back();
+    return;
+  }
+
+  commitPortfolioUrl(activePortfolioRoute(""), { mode: "replace", photoEntry: false });
+  updateViewMeta();
+}
+
+function closeDetailProgrammatically() {
+  state.activeId = null;
+  closeOverlay("detailOverlay");
+  if (readPortfolioUrl().photo) {
+    commitPortfolioUrl(activePortfolioRoute(""), { mode: "replace", photoEntry: false });
+  } else {
+    updateViewMeta();
+  }
+}
+
+function updateViewMeta() {
+  const photo = state.activeId && state.photos.find(item => item.id === state.activeId);
+  const group = state.activeAlbum !== "all" && state.activeAlbum !== "starred"
+    ? state.albumGroups.find(item => item.name === state.activeAlbum)
+    : null;
+  let title = SITE.pageTitle;
+  let description = SITE.metaDescription;
+  let image = "";
+  let canonicalRoute = {};
+
+  if (photo) {
+    title = `${photo.title || "Untitled"} | ${SITE.name} Photography`;
+    description = photo.description || compact(uniq([photo.series, publicLocation(photo.location)])) || SITE.metaDescription;
+    image = cloudinaryUrl(photo.cloudinaryId, "w_1200,q_80,f_auto");
+    canonicalRoute = { photo: photo.id };
+  } else if (group) {
+    title = `${group.name} | ${SITE.name} Photography`;
+    description = group.description || `${group.count} photograph${group.count === 1 ? "" : "s"} from the ${group.name} collection.`;
+    image = group.cover ? cloudinaryUrl(group.cover, "w_1200,q_80,f_auto") : "";
+    canonicalRoute = { collection: group.name };
+  } else if (state.activeAlbum === "starred") {
+    title = `Featured | ${SITE.name} Photography`;
+    description = "A focused edit of photographs from the archive.";
+    const featured = state.photos.find(item => item.starred && item.cloudinaryId);
+    image = featured ? cloudinaryUrl(featured.cloudinaryId, "w_1200,q_80,f_auto") : "";
+    canonicalRoute = { view: "featured" };
+  } else {
+    const hero = state.photos.find(item => item.id === state.heroPhotoId);
+    image = hero ? cloudinaryUrl(hero.cloudinaryId, "w_1200,q_80,f_auto") : defaultSocialImageUrl();
+  }
+
+  const canonical = buildPortfolioUrl(canonicalRoute, { share: true }).href;
+  document.title = title;
+  setAttr("metaDescription", "content", description);
+  setAttr("ogTitle", "content", title);
+  setAttr("ogDescription", "content", description);
+  setAttr("ogUrl", "content", canonical);
+  setAttr("canonicalLink", "href", canonical);
+  setAttr("twitterTitle", "content", title);
+  setAttr("twitterDescription", "content", description);
+  updateSocialImage(image || defaultSocialImageUrl());
+}
+
+function showSiteNotice(message) {
+  const notice = document.getElementById("siteNotice");
+  if (!notice) return;
+  clearTimeout(siteNoticeTimer);
+  notice.textContent = "";
+  requestAnimationFrame(() => {
+    notice.textContent = message;
+    notice.classList.add("visible");
+  });
+  siteNoticeTimer = setTimeout(() => {
+    notice.classList.remove("visible");
+    notice.textContent = "";
+  }, 3200);
+}
+
+function shareDetails(kind, value) {
+  if (kind === "photo") {
+    const photo = state.photos.find(item => item.id === value);
+    if (!photo) return null;
+    const title = photo.title || "Untitled photograph";
+    return {
+      title: `${title} | ${SITE.name} Photography`,
+      text: `View \"${title}\" by ${SITE.name}.`,
+      url: buildPortfolioUrl({ photo: photo.id }, { share: true }).href
+    };
+  }
+
+  if (kind === "collection") {
+    const group = state.albumGroups.find(item => item.name === value);
+    if (!group) return null;
+    return {
+      title: `${group.name} | ${SITE.name} Photography`,
+      text: `View the ${group.name} photography collection by ${SITE.name}.`,
+      url: buildPortfolioUrl({ collection: group.name }, { share: true }).href
+    };
+  }
+  return null;
+}
+
+function shareActionsMarkup(kind, value, label) {
+  const safeKind = escA(kind);
+  const safeValue = escA(value);
+  const safeLabel = escA(label);
+  const shareLabel = kind === "collection" ? "Share collection" : "Share";
+  const nativeShare = typeof navigator.share === "function"
+    ? `<button type="button" class="btn-ghost share-btn" data-action="share" data-share-kind="${safeKind}" data-share-value="${safeValue}" aria-label="Share ${safeLabel}">${shareLabel}</button>`
+    : "";
+  return `<div class="share-actions ${kind === "photo" ? "detail-share-actions" : ""}">
+    ${nativeShare}
+    <button type="button" class="btn-quiet share-btn" data-action="copy-link" data-share-kind="${safeKind}" data-share-value="${safeValue}" aria-label="Copy link to ${safeLabel}">Copy link</button>
+  </div>`;
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch (_) {
+      // Fall back for browsers that expose the API but block permission.
+    }
+  }
+
+  const active = document.activeElement;
+  const input = document.createElement("textarea");
+  input.value = value;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  let copied = false;
+  try {
+    input.select();
+    copied = typeof document.execCommand === "function" && document.execCommand("copy");
+  } finally {
+    input.remove();
+    if (active?.isConnected) active.focus();
+  }
+  if (!copied) throw new Error("Clipboard unavailable");
+}
+
+async function handleShareAction(button) {
+  const details = shareDetails(button.dataset.shareKind, button.dataset.shareValue);
+  if (!details) {
+    showSiteNotice("That link is no longer available.");
+    return;
+  }
+
+  if (button.dataset.action === "share") {
+    if (typeof navigator.share !== "function") return;
+    try {
+      await navigator.share(details);
+    } catch (err) {
+      if (err?.name !== "AbortError") showSiteNotice("Could not open sharing. Copy the link instead.");
+    }
+    return;
+  }
+
+  try {
+    await copyText(details.url);
+    showSiteNotice("Link copied.");
+  } catch (_) {
+    showSiteNotice("Could not copy the link.");
+  }
 }
 
 function setText(id, value) {
@@ -325,7 +708,9 @@ function bindEvents() {
     if (!id) return;
     try {
       const outcome = await sbDelete(id);
-      closeOverlay("detailOverlay");
+      if (state.activeId === id) {
+        closeDetailProgrammatically();
+      }
       await refresh();
       const cleanupIncomplete = outcome && !["deleted", "not_found", "not_needed"].includes(outcome.imageCleanup);
       if (outcome?.database === "not_found") {
@@ -463,6 +848,9 @@ function bindEvents() {
   });
 
   window.addEventListener("hashchange", handleOwnerHash);
+  window.addEventListener("popstate", () => {
+    applyPortfolioUrlState({ render: true, announce: true, source: "popstate" });
+  });
 
   document.addEventListener("click", e => {
     const navClose = e.target.closest("[data-nav-close]");
@@ -472,15 +860,24 @@ function bindEvents() {
 
     const closer = e.target.closest("[data-close]");
     if (closer) {
-      closeOverlay(closer.dataset.close);
-      if (closer.dataset.close === "reviewOverlay") closeReview();
+      const overlayId = closer.dataset.close;
+      if (overlayId === "detailOverlay") closeDetailFromUser();
+      else if (overlayId === "reviewOverlay") closeReview();
+      else {
+        closeOverlay(overlayId);
+        syncDetailOverlayFromState();
+      }
       return;
     }
 
     if (e.target.classList.contains("modal-overlay")) {
       const id = e.target.id;
       if (id === "reviewOverlay") closeReview();
-      else closeOverlay(id);
+      else if (id === "detailOverlay") closeDetailFromUser();
+      else {
+        closeOverlay(id);
+        syncDetailOverlayFromState();
+      }
       return;
     }
 
@@ -520,30 +917,39 @@ function bindEvents() {
     const action = e.target.closest("[data-action]");
     if (action) {
       const { action: type, photoId } = action.dataset;
+      if (type === "share" || type === "copy-link") {
+        handleShareAction(action).catch(err => {
+          console.error(err);
+          showSiteNotice("Sharing is temporarily unavailable.");
+        });
+        return;
+      }
       if (type === "edit") startEdit(photoId);
       if (type === "delete") confirmDelete(photoId);
       if (type === "download") downloadPhoto(photoId);
       if (type === "star") toggleStar(photoId);
       if (type === "set-cover") setAlbumCover(photoId);
-      if (type === "close") closeOverlay("detailOverlay");
+      if (type === "close") closeDetailFromUser();
       return;
     }
 
     const seriesFilter = e.target.closest("[data-series]");
     if (seriesFilter) {
+      if (seriesFilter.matches("a")) e.preventDefault();
       const series = seriesFilter.dataset.series;
-      setActiveAlbum(series, { scrollIntoView: !!seriesFilter.closest(".series-tile") });
+      const hrefTarget = seriesFilter.matches("a") ? seriesFilter.getAttribute("href") : "";
+      setActiveAlbum(series, {
+        scrollIntoView: !!seriesFilter.closest(".series-tile") || hrefTarget === "#gallery"
+      });
+      if (hrefTarget === "#collections") {
+        document.getElementById("collections")?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth" });
+      }
       return;
     }
 
     const starred = e.target.closest("[data-starred-filter]");
     if (starred) {
-      state.activeAlbum = state.activeAlbum === "starred" ? "all" : "starred";
-      state.searchQ = "";
-      document.getElementById("searchInput").value = "";
-      renderFilters();
-      renderProjectIntro();
-      renderGallery();
+      setActiveAlbum(state.activeAlbum === "starred" ? "all" : "starred");
     }
   });
 
@@ -575,18 +981,21 @@ function bindEvents() {
       }
       if (document.getElementById("confirmOverlay").classList.contains("open")) {
         closeOverlay("confirmOverlay");
+        syncDetailOverlayFromState();
         return;
       }
       if (document.getElementById("detailOverlay").classList.contains("open")) {
-        closeOverlay("detailOverlay");
+        closeDetailFromUser();
         return;
       }
       if (document.getElementById("albumOverlay").classList.contains("open")) {
         closeOverlay("albumOverlay");
+        syncDetailOverlayFromState();
         return;
       }
       if (document.getElementById("loginOverlay").classList.contains("open")) {
         closeOverlay("loginOverlay");
+        syncDetailOverlayFromState();
       }
     }
 
@@ -613,7 +1022,7 @@ function registerSecretTap() {
 function handleOwnerHash() {
   if (window.location.hash.toLowerCase() !== "#owner") return;
   openOwnerAccess();
-  history.replaceState(null, "", window.location.pathname + window.location.search);
+  history.replaceState(history.state, "", window.location.pathname + window.location.search);
 }
 
 function setMobileMenu(open) {
@@ -754,17 +1163,19 @@ async function handleLogin(e) {
   await refresh();
 }
 
-function signOut() {
+function signOut({ preservePortfolioRoute = false } = {}) {
   state.ownerToken = "";
   removeSessionValue("ownerToken");
   syncOwnerUI();
   closeReview();
-  closeOverlay("detailOverlay");
+  if (preservePortfolioRoute) closeOverlay("detailOverlay");
+  else closeDetailProgrammatically();
   document.getElementById("galleryWrap")?.setAttribute("aria-busy", "false");
   document.getElementById("seriesWrap")?.setAttribute("aria-busy", "false");
   renderSeries();
   renderProjectIntro();
   renderGallery();
+  if (preservePortfolioRoute) syncDetailOverlayFromState();
 }
 
 function setStatus(msg) {
@@ -1318,11 +1729,12 @@ function closeReview() {
   state.reviewQueue = [];
   state.reviewMode = "create";
   closeOverlay("reviewOverlay");
+  syncDetailOverlayFromState();
 }
 
 function handleSessionExpired() {
   setStatus("Session expired. Sign in again.");
-  signOut();
+  signOut({ preservePortfolioRoute: true });
 }
 
 async function authedFetch(path, init = {}) {
@@ -1631,12 +2043,13 @@ async function refresh() {
     // Public rows deliberately omit private coordinates. Disable every owner
     // mutation before rendering those partial rows, or an unrelated edit could
     // overwrite stored coordinates with an empty value.
-    signOut();
+    signOut({ preservePortfolioRoute: true });
   }
 
   if (photosResult.status === "fulfilled") {
     state.photos = photosResult.value;
     state.loadFailed = false;
+    portfolioRouteReady = true;
   } else {
     console.error("Could not load portfolio photos", photosResult.reason);
     state.photos = state.photos || [];
@@ -1658,9 +2071,16 @@ async function refresh() {
   sortPhotos();
   state.albumGroups = buildAlbumGroups(state.photos, state.albums);
 
-  const albumNames = new Set(state.albumGroups.map(group => group.name));
-  if (state.activeAlbum !== "all" && state.activeAlbum !== "starred" && !albumNames.has(state.activeAlbum)) {
-    state.activeAlbum = "all";
+  let scrollToSharedView = false;
+  if (photosResult.status === "fulfilled") {
+    applyPortfolioUrlState({ render: false, announce: true });
+    scrollToSharedView = !initialPortfolioRouteApplied && state.activeAlbum !== "all" && !state.activeId;
+    initialPortfolioRouteApplied = true;
+  } else {
+    const albumNames = new Set(state.albumGroups.map(group => group.name));
+    if (state.activeAlbum !== "all" && state.activeAlbum !== "starred" && !albumNames.has(state.activeAlbum)) {
+      state.activeAlbum = "all";
+    }
   }
 
   renderHero();
@@ -1673,6 +2093,11 @@ async function refresh() {
   renderProjectIntro();
   renderGallery();
   initScrollReveal();
+  syncDetailOverlayFromState();
+  updateViewMeta();
+  if (scrollToSharedView) {
+    requestAnimationFrame(() => document.getElementById("gallery")?.scrollIntoView({ behavior: "auto" }));
+  }
   galleryWrap?.setAttribute("aria-busy", "false");
   seriesWrap?.setAttribute("aria-busy", "false");
 }
@@ -1933,6 +2358,7 @@ function renderProjectIntro() {
           <button type="button" class="btn-ghost" data-series="all">View all work</button>
           ${nextName && nextName !== group.name ? `<button type="button" class="btn-quiet" data-series="${escA(nextName)}">Next collection</button>` : ""}
           ${ownerActions}
+          ${shareActionsMarkup("collection", group.name, `${group.name} collection`)}
         </div>
       </div>
     </div>`;
@@ -2004,39 +2430,52 @@ function emptyActions(noPhotos) {
   return `<button type="button" class="btn-quiet" data-reset-gallery="1">Clear filters</button>`;
 }
 
-function setActiveAlbum(albumName, { scrollIntoView = false } = {}) {
+function setActiveAlbum(albumName, { scrollIntoView = false, historyMode = "push" } = {}) {
   state.activeAlbum = albumName;
+  state.activeId = null;
   state.searchQ = "";
   document.getElementById("searchInput").value = "";
+  closeOverlay("detailOverlay");
+  commitPortfolioUrl(activePortfolioRoute(""), { mode: historyMode, photoEntry: false });
   renderFilters();
   renderProjectIntro();
   renderGallery();
+  updateViewMeta();
   if (scrollIntoView) {
     document.getElementById("gallery").scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth" });
   }
 }
 
 function resetGallery() {
-  state.searchQ = "";
-  state.activeAlbum = "all";
-  document.getElementById("searchInput").value = "";
-  renderFilters();
-  renderProjectIntro();
-  renderGallery();
+  setActiveAlbum("all");
 }
 
-function openDetail(id) {
+function openDetail(id, { historyMode = "push" } = {}) {
   const photo = state.photos.find(item => item.id === id);
   if (!photo) return;
+  if (!filtered().some(item => item.id === id)) {
+    state.activeAlbum = "all";
+    state.searchQ = "";
+    document.getElementById("searchInput").value = "";
+    renderFilters();
+    renderProjectIntro();
+    renderGallery();
+  }
   state.activeId = id;
+  commitPortfolioUrl(activePortfolioRoute(id), {
+    mode: historyMode,
+    photoEntry: historyMode === "push" || Boolean(history.state?.portfolioPhotoEntry)
+  });
   renderDetail(photo);
   openOverlay("detailOverlay");
+  updateViewMeta();
 }
 
 function renderDetail(photo) {
   const photos = filtered();
   const index = photos.findIndex(item => item.id === photo.id);
   const image = document.getElementById("detailImg");
+  detailRenderKey = buildDetailRenderKey(photo);
 
   document.getElementById("detailCounter").textContent = index >= 0 && photos.length > 1 ? `${index + 1} of ${photos.length}` : "Photograph";
   document.getElementById("detailTitle").textContent = photo.title || "Untitled";
@@ -2065,6 +2504,11 @@ function renderDetail(photo) {
     if (photo.lens) tags.push(`<span class="tag">${esc(photo.lens)}</span>`);
   }
   document.getElementById("detailTags").innerHTML = tags.filter(Boolean).join("");
+  document.getElementById("detailShareActions").innerHTML = shareActionsMarkup(
+    "photo",
+    photo.id,
+    `photograph: ${photo.title || "Untitled"}`
+  );
 
   const publicMeta = [
     ["Collection", photo.series || "-"],
@@ -2118,7 +2562,12 @@ function navDetail(direction) {
   const next = photos[index + direction];
   if (!next) return;
   state.activeId = next.id;
+  commitPortfolioUrl(activePortfolioRoute(next.id), {
+    mode: "replace",
+    photoEntry: Boolean(history.state?.portfolioPhotoEntry)
+  });
   renderDetail(next);
+  updateViewMeta();
 }
 
 async function toggleStar(id) {
@@ -2135,6 +2584,17 @@ async function toggleStar(id) {
 
   try {
     await sbToggleStar(id, photo.starred);
+    if (state.activeAlbum === "starred" && !photo.starred) {
+      state.activeAlbum = "all";
+      commitPortfolioUrl(activePortfolioRoute(photo.id), {
+        mode: "replace",
+        photoEntry: Boolean(history.state?.portfolioPhotoEntry)
+      });
+      renderFilters();
+      renderProjectIntro();
+      renderGallery();
+      renderDetail(photo);
+    }
     setStatus(photo.starred ? "Marked as featured." : "Removed from featured.");
   } catch (err) {
     console.error(err);
@@ -2162,7 +2622,6 @@ async function setAlbumCover(id) {
       sortOrder: existing?.sortOrder || 0
     });
     await refresh();
-    openDetail(photo.id);
     setStatus("Collection cover updated.");
   } catch (err) {
     console.error(err);
@@ -2190,6 +2649,8 @@ function buildInquiryLink(photo) {
     "",
     `I'm interested in \"${photo.title || "this photograph"}\"${photo.series ? ` from ${photo.series}` : ""}.`,
     "",
+    `Photograph: ${buildPortfolioUrl({ photo: photo.id }, { share: true }).href}`,
+    "",
     "Could you share pricing or print details?",
     ""
   ].join("\n");
@@ -2201,7 +2662,7 @@ function startEdit(id) {
   if (!photo || !state.ownerMode) return;
   state.reviewMode = "edit";
   state.reviewQueue = [makeDraft(photo)];
-  closeOverlay("detailOverlay");
+  closeDetailProgrammatically();
   renderReview();
   openOverlay("reviewOverlay");
   setStatus("Editing photograph.");
