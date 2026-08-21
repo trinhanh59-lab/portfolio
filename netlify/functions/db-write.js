@@ -12,6 +12,19 @@ const ALLOWED = {
 const FETCH_TIMEOUT_MS = 15000;
 const READ_PAGE_SIZE = 1000;
 
+function supabaseHeaders(key) {
+  const headers = {
+    "Content-Type": "application/json",
+    "apikey": key
+  };
+  // Modern sb_secret_ keys authorize through the apikey header and are not
+  // JWTs. Legacy service_role keys still need the bearer header.
+  if (!key.startsWith("sb_secret_")) {
+    headers.Authorization = `Bearer ${key}`;
+  }
+  return headers;
+}
+
 async function fetchWithTimeout(url, init = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -104,11 +117,7 @@ exports.handler = async (event) => {
   const tableCfg = ALLOWED[table];
   if (!tableCfg) return { statusCode: 400, body: "Unknown table" };
 
-  const headers = {
-    "Content-Type": "application/json",
-    "apikey": serviceKey,
-    "Authorization": `Bearer ${serviceKey}`
-  };
+  const headers = supabaseHeaders(serviceKey);
 
   let url = `${supabaseUrl}/rest/v1/${table}`;
   let init;

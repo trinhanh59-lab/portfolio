@@ -75,6 +75,25 @@ try {
   assert.equal(JSON.parse(selected.body).length, 1001);
   assert.deepEqual(ranges, ["0-999", "1000-1999"]);
 
+  let modernHeaders;
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_test-server-key";
+  globalThis.fetch = async (_url, init) => {
+    modernHeaders = init.headers;
+    return new Response("[]", {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+  const modernSelected = await dbWrite({
+    httpMethod: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ table: "photos", op: "select" })
+  });
+  assert.equal(modernSelected.statusCode, 200);
+  assert.equal(modernHeaders.apikey, "sb_secret_test-server-key");
+  assert.ok(!Object.hasOwn(modernHeaders, "Authorization"));
+  process.env.SUPABASE_SERVICE_ROLE_KEY = testEnv.SUPABASE_SERVICE_ROLE_KEY;
+
   let writeRequest;
   globalThis.fetch = async (url, init) => {
     writeRequest = { url, init };
